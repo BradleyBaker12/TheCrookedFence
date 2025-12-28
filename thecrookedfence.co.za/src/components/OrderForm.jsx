@@ -1,0 +1,772 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp
+} from "firebase/firestore";
+import { db } from "../lib/firebase.js";
+import {
+  COUNTRY_CODES,
+  DEFAULT_FORM_DELIVERY_OPTIONS,
+  DEFAULT_LIVESTOCK_DELIVERY_OPTIONS
+} from "../data/defaults.js";
+
+const cardClass = "bg-brandBeige shadow-lg rounded-2xl border border-brandGreen/10";
+const inputClass =
+  "w-full rounded-lg border border-brandGreen/20 bg-white/70 px-4 py-3 text-brandGreen placeholder:text-brandGreen/50 focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30";
+
+const createDefaultForm = (isLivestock) => ({
+  name: "",
+  surname: "",
+  email: "",
+  countryCode: "+27",
+  cellphone: "",
+  address: "",
+  deliveryOption: isLivestock
+    ? DEFAULT_LIVESTOCK_DELIVERY_OPTIONS[0].id
+    : DEFAULT_FORM_DELIVERY_OPTIONS[0].id,
+  otherDelivery: "",
+  sendDate: "",
+  notes: ""
+});
+
+const toQuantityMap = (items, existing = {}) => {
+  const map = {};
+  items.forEach((item) => {
+    map[item.id] = existing[item.id] ?? 0;
+  });
+  return map;
+};
+
+export default function OrderForm({ variant = "eggs" }) {
+  const isLivestock = variant === "livestock";
+  const pageTitle = isLivestock ? "Livestock Order Form" : "Fertile Egg Order Form";
+  const itemTitle = isLivestock ? "Livestock type & quantities" : "Egg types & quantities";
+  const itemLabel = isLivestock ? "livestock type" : "egg type";
+  const dateLabel = isLivestock
+    ? "Preferred delivery/need-by date*"
+    : "Send date*";
+  const dateHelper = isLivestock
+    ? "Tell us when you need the livestock (e.g., next week Wednesday)."
+    : "";
+
+  const initialItems = [];
+  const [items, setItems] = useState(initialItems);
+  const [categories, setCategories] = useState([]);
+  const [form, setForm] = useState(() => createDefaultForm(isLivestock));
+  const [deliveryOptions, setDeliveryOptions] = useState(
+    isLivestock ? DEFAULT_LIVESTOCK_DELIVERY_OPTIONS : DEFAULT_FORM_DELIVERY_OPTIONS
+  );
+  const [quantities, setQuantities] = useState(() => toQuantityMap(initialItems));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [orderNumber, setOrderNumber] = useState(null);
+
+  useEffect(() => {
+    const ref = collection(db, isLivestock ? "livestockTypes" : "eggTypes");
+    const typesQuery = query(ref, orderBy("order", "asc"));
+    const unsubscribe = onSnapshot(
+      typesQuery,
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => {
+          const docData = docSnap.data();
+          return {
+            id: docSnap.id,
+            label: docData.label ?? "Unnamed",
+            price: Number(docData.price ?? 0),
+            specialPrice:
+              docData.specialPrice === undefined ? null : Number(docData.specialPrice),
+            order: docData.order ?? 0,
+            categoryId: docData.categoryId ?? "",
+            categoryName: docData.categoryName ?? docData.category ?? ""
+          };
+        });
+        setItems(data);
+        setQuantities((prev) => toQuantityMap(data, prev));
+      },
+      (err) => {
+        console.error("type load error", err);
+        setItems([]);
+        setQuantities({});
+      }
+    );
+
+    return () => unsubscribe();
+  }, [isLivestock]);
+
+  useEffect(() => {
+    if (!isLivestock) {
+      setCategories([]);
+      return undefined;
+    }
+
+    const ref = collection(db, "livestockCategories");
+    const categoriesQuery = query(ref, orderBy("name", "asc"));
+    const unsubscribe = onSnapshot(
+      categoriesQuery,
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => {
+          const docData = docSnap.data();
+          return {
+            id: docSnap.id,
+            name: docData.name ?? "",
+            description: docData.description ?? ""
+          };
+        });
+        setCategories(data);
+      },
+      (err) => {
+        console.error("livestockCategories load error", err);
+        setCategories([]);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [isLivestock]);
+
+  useEffect(() => {
+    const ref = collection(
+      db,
+      isLivestock ? "livestockDeliveryOptions" : "deliveryOptions"
+    );
+    const deliveryQuery = query(ref, orderBy("order", "asc"));
+    const fallback = isLivestock
+      ? DEFAULT_LIVESTOCK_DELIVERY_OPTIONS
+      : DEFAULT_FORM_DELIVERY_OPTIONS;
+    const unsubscribe = onSnapshot(
+      deliveryQuery,
+      (snapshot) => {
+        const data = snapshot.docs.map((docSnap) => {
+          const docData = docSnap.data();
+          return {
+            id: docSnap.id,
+            label: docData.label ?? "Delivery",
+            cost: Number(docData.cost ?? 0),
+            order: docData.order ?? 0
+          };
+        });
+        const merged = data.length > 0 ? data : fallback;
+        setDeliveryOptions(merged);
+        if (!merged.find((option) => option.id === form.deliveryOption)) {
+          setForm((prev) => ({ ...prev, deliveryOption: merged[0]?.id ?? "" }));
+        }
+      },
+      (err) => {
+        console.error("deliveryOptions load error", err);
+        setDeliveryOptions(fallback);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [form.deliveryOption, isLivestock]);
+
+  const selectedItems = useMemo(
+    () => items.filter((item) => (quantities[item.id] ?? 0) > 0),
+    [items, quantities]
+  );
+
+  const subtotal = useMemo(
+    () =>
+      selectedItems.reduce((sum, item) => {
+        const special = item.specialPrice ?? null;
+        const unitPrice = special === null || special === 0 ? item.price ?? 0 : special;
+        const qty = quantities[item.id] ?? 0;
+        return sum + unitPrice * qty;
+      }, 0),
+    [selectedItems, quantities]
+  );
+
+  const itemBreakdown = useMemo(
+    () =>
+      selectedItems.map((item) => {
+        const special = item.specialPrice ?? null;
+        const unitPrice = special === null || special === 0 ? item.price ?? 0 : special;
+        const qty = quantities[item.id] ?? 0;
+        return {
+          id: item.id,
+          label: item.label,
+          qty,
+          unitPrice,
+          lineTotal: unitPrice * qty
+        };
+      }),
+    [selectedItems, quantities]
+  );
+
+  const deliveryCost = useMemo(() => {
+    const option = deliveryOptions.find((opt) => opt.id === form.deliveryOption);
+    return option ? option.cost : 0;
+  }, [deliveryOptions, form.deliveryOption]);
+
+  const total = subtotal + deliveryCost;
+
+  const setField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const formatCellphone = () => {
+    const digits = form.countryCode.replace(/[^\d]/g, "");
+    const prefix = digits ? `+${digits}` : "";
+    return `${prefix} ${form.cellphone.trim()}`.trim();
+  };
+
+  const validate = () => {
+    if (
+      !form.name.trim() ||
+      !form.surname.trim() ||
+      !form.email.trim() ||
+      !form.countryCode.trim() ||
+      !form.cellphone.trim() ||
+      !form.address.trim() ||
+      !form.deliveryOption ||
+      !form.sendDate
+    ) {
+      return "Please fill in all required fields.";
+    }
+    if (form.deliveryOption === "other" && !form.otherDelivery.trim()) {
+      return "Please specify your other delivery option.";
+    }
+    if (selectedItems.length === 0) {
+      return `Please order at least one ${itemLabel} (quantities above 0).`;
+    }
+    return "";
+  };
+
+  const groupedLivestock = useMemo(() => {
+    if (!isLivestock) return [];
+    const categoryMap = new Map();
+    const categoryIds = categories.map((cat) => cat.id);
+    const categoryDescriptionMap = new Map(
+      categories.map((cat) => [cat.name.trim().toLowerCase(), cat.description ?? ""])
+    );
+
+    items.forEach((item) => {
+      const fallbackName = item.categoryName?.trim().length
+        ? item.categoryName
+        : "Category";
+      const key = item.categoryId || `name:${fallbackName}`;
+      const category = categories.find((cat) => cat.id === item.categoryId);
+      const label = category?.name ?? fallbackName;
+      const description =
+        category?.description ??
+        categoryDescriptionMap.get(fallbackName.trim().toLowerCase()) ??
+        "";
+
+      if (!categoryMap.has(key)) {
+        categoryMap.set(key, { label, items: [], description });
+      }
+      categoryMap.get(key).items.push(item);
+    });
+
+    const orderedKeys = [
+      ...categoryIds.filter((id) => categoryMap.has(id)),
+      ...Array.from(categoryMap.keys()).filter((id) => !categoryIds.includes(id))
+    ];
+
+    return orderedKeys.map((id) => ({ id, ...categoryMap.get(id) }));
+  }, [items, categories, isLivestock]);
+
+  const submitOrder = async (event) => {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setOrderNumber(null);
+
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const selectedDelivery = deliveryOptions.find(
+        (option) => option.id === form.deliveryOption
+      );
+
+      const payload = {
+        name: form.name.trim(),
+        surname: form.surname.trim(),
+        email: form.email.trim(),
+        cellphone: formatCellphone(),
+        address: form.address.trim(),
+        deliveryOptionId: form.deliveryOption,
+        deliveryOption:
+          form.deliveryOption === "other"
+            ? `Other: ${form.otherDelivery.trim()}`
+            : selectedDelivery?.label ?? "",
+        deliveryCost: selectedDelivery?.cost ?? 0,
+        otherDelivery: form.deliveryOption === "other" ? form.otherDelivery.trim() : "",
+        sendDate: form.sendDate,
+        eggs: selectedItems.map((item) => ({
+          id: item.id,
+          label: item.label,
+          quantity: quantities[item.id],
+          price: item.price,
+          specialPrice: item.specialPrice ?? null
+        })),
+        formType: variant,
+        orderStatus: "pending",
+        fulfilledEggs: [],
+        trackingLink: "",
+        notes: form.notes.trim(),
+        paid: false,
+        createdAt: serverTimestamp()
+      };
+
+      const collectionName = isLivestock ? "livestockOrders" : "eggOrders";
+      const created = await addDoc(collection(db, collectionName), payload);
+
+      let updatedOrderNumber = null;
+      for (let i = 0; i < 5; i += 1) {
+        const snapshot = await getDoc(doc(db, collectionName, created.id));
+        const nextNumber = snapshot.data()?.orderNumber;
+        if (nextNumber) {
+          updatedOrderNumber = nextNumber;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      setOrderNumber(updatedOrderNumber);
+      setSuccess(
+        updatedOrderNumber
+          ? `Order submitted! Your order number is ${updatedOrderNumber}. Please use it as your payment reference.`
+          : "Order submitted successfully! Thank you for your support."
+      );
+      setIsModalOpen(true);
+      setForm(createDefaultForm(isLivestock));
+      setQuantities(items.reduce((acc, item) => ({ ...acc, [item.id]: 0 }), {}));
+    } catch (err) {
+      console.error("Order submit error:", err);
+      const message =
+        err?.code === "permission-denied"
+          ? "Submission blocked by Firestore rules. Please allow creates to the target collection."
+          : err?.message?.includes("Firebase")
+            ? `Firebase error: ${err.message}`
+            : "Something went wrong while submitting. Please try again.";
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div className={`${cardClass} p-6 md:p-8`}>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <img
+            src="/assets/crookedfencelogosmall(1)-D2NbFJhG.png"
+            alt="The Crooked Fence logo"
+            className="h-32 w-auto object-contain"
+          />
+          <div className="space-y-2">
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-brandGreen/70">
+              The Crooked Fence
+            </p>
+            <h1 className="text-3xl font-bold text-brandGreen">{pageTitle}</h1>
+            <p className="text-brandGreen/80">
+              Please help us keep track of our egg orders by filling in the following. Thank you
+              so much for your support.
+            </p>
+          </div>
+          <div className="w-full space-y-2 rounded-xl bg-white/70 p-4 text-left text-sm text-brandGreen shadow-inner">
+            <p className="font-semibold text-red-700">
+              This form is not monitored. If you place an order here, please WhatsApp 082 891
+              07612 to confirm payment.
+            </p>
+            <p className="text-brandGreen/80">
+              Support email:{" "}
+              <a
+                href="mailto:stolschristopher60@gmail.com"
+                className="font-semibold underline"
+              >
+                stolschristopher60@gmail.com
+              </a>
+            </p>
+            {isLivestock ? (
+              <p className="text-brandGreen/80">
+                Delivery prices are shown per option; livestock delivery differs from eggs.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <form onSubmit={submitOrder} className={`${cardClass} space-y-6 p-6 md:p-8`}>
+        <div className={`${cardClass} space-y-4 p-4 md:p-5`}>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-brandGreen">{itemTitle}</h2>
+              {!isLivestock ? (
+                <>
+                  <p className="text-sm text-brandGreen/70">
+                    Limited Quantities of Chicken Breed. Orders can only be made up to 20 at a
+                    time per breed.
+                  </p>
+                  <p className="text-sm text-brandGreen/70">
+                    Bulk quantities available for Indian Runner Ducks and Quail.
+                  </p>
+                </>
+              ) : null}
+            </div>
+            <div className="space-y-1 text-sm text-brandGreen/80">
+              <p>
+                <span className="font-semibold text-brandGreen">{dateLabel}</span>
+              </p>
+              <input
+                type="date"
+                className={`${inputClass} md:w-56`}
+                value={form.sendDate}
+                onChange={(event) => setField("sendDate", event.target.value)}
+                required
+              />
+              {dateHelper ? (
+                <p className="text-xs text-brandGreen/70">{dateHelper}</p>
+              ) : null}
+            </div>
+          </div>
+
+          {isLivestock ? (
+            <div className="space-y-4">
+              {groupedLivestock.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-brandGreen/30 bg-white/70 px-4 py-6 text-sm text-brandGreen/70">
+                  No livestock types found. Add some on the admin dashboard.
+                </div>
+              ) : (
+                groupedLivestock.map((group) => (
+                  <div
+                    key={group.id}
+                    className="space-y-2 rounded-xl border border-brandGreen/15 bg-white/70 p-4 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <p className="font-semibold text-brandGreen">{group.label}</p>
+                        {group.description ? (
+                          <p className="text-sm text-brandGreen/80">{group.description}</p>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-end">
+                        <span className="text-xs text-brandGreen/60">
+                          {group.items.length} item{group.items.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {group.items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-brandGreen/15 bg-brandBeige/40 p-3 shadow-sm"
+                        >
+                          <div className="flex justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-brandGreen">{item.label}</p>
+                              <p className="text-sm text-brandGreen/70">
+                                Normal: R{item.price.toFixed(2)}
+                                {item.specialPrice !== null && item.specialPrice !== undefined
+                                  ? ` \u00b7 Special: R${item.specialPrice.toFixed(2)}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <input
+                              type="number"
+                              min={0}
+                              className="w-24 rounded-lg border border-brandGreen/30 bg-brandCream px-3 py-2 text-right font-semibold text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30"
+                              value={quantities[item.id] ?? 0}
+                              onChange={(event) =>
+                                setQuantities((prev) => ({
+                                  ...prev,
+                                  [item.id]: Math.max(0, Number(event.target.value))
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {items.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-brandGreen/30 bg-white/70 px-4 py-6 text-sm text-brandGreen/70">
+                  No egg types found. Add some on the admin dashboard.
+                </div>
+              ) : (
+                items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-brandGreen/15 bg-white/70 p-3 shadow-sm"
+                  >
+                    <div className="flex justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-brandGreen">{item.label}</p>
+                        <p className="text-sm text-brandGreen/70">
+                          Normal: R{item.price.toFixed(2)}
+                          {item.specialPrice !== null && item.specialPrice !== undefined
+                            ? ` \u00b7 Special: R${item.specialPrice.toFixed(2)}`
+                            : ""}
+                        </p>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        className="w-24 rounded-lg border border-brandGreen/30 bg-brandCream px-3 py-2 text-right font-semibold text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30"
+                        value={quantities[item.id] ?? 0}
+                        onChange={(event) =>
+                          setQuantities((prev) => ({
+                            ...prev,
+                            [item.id]: Math.max(0, Number(event.target.value))
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-brandGreen">
+                  Notes / comments (optional)
+                </label>
+                <textarea
+                  className={`${inputClass} min-h-28`}
+                  value={form.notes}
+                  onChange={(event) => setField("notes", event.target.value)}
+                  placeholder="Add any special requests or notes for the farm..."
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-brandGreen">Name*</label>
+            <input
+              type="text"
+              className={inputClass}
+              value={form.name}
+              onChange={(event) => setField("name", event.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-brandGreen">Surname*</label>
+            <input
+              type="text"
+              className={inputClass}
+              value={form.surname}
+              onChange={(event) => setField("surname", event.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-brandGreen">Email*</label>
+            <input
+              type="email"
+              className={inputClass}
+              value={form.email}
+              onChange={(event) => setField("email", event.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-brandGreen">
+              Cellphone number*
+            </label>
+            <div className="grid grid-cols-[200px_1fr] gap-2">
+              <select
+                className={inputClass}
+                value={form.countryCode}
+                onChange={(event) => setField("countryCode", event.target.value)}
+              >
+                {COUNTRY_CODES.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.label} ({country.code})
+                  </option>
+                ))}
+              </select>
+              <input
+                type="tel"
+                className={inputClass}
+                value={form.cellphone}
+                onChange={(event) => setField("cellphone", event.target.value)}
+                placeholder="e.g. 82 123 4567"
+                required
+              />
+            </div>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="block text-sm font-semibold text-brandGreen">
+              Delivery address*
+            </label>
+            <textarea
+              className={`${inputClass} min-h-28`}
+              value={form.address}
+              onChange={(event) => setField("address", event.target.value)}
+              placeholder="Street name and number, Suburb, Town, Postal code. For PUDO please add the locker name. (PUDO IS FOR EGGS ONLY)"
+              required
+            />
+            <p className="text-xs text-brandGreen/70">
+              Street name and number, Suburb, Town, Postal code. For PUDO please add the locker
+              name. (PUDO IS FOR EGGS ONLY)
+            </p>
+          </div>
+        </div>
+
+        <div className={`${cardClass} p-4 md:p-5`}>
+          <h2 className="text-lg font-bold text-brandGreen">Delivery options*</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {deliveryOptions.map((option) => (
+              <label
+                key={option.id}
+                className="flex cursor-pointer gap-3 rounded-lg border border-brandGreen/20 bg-white/70 p-3 transition hover:border-brandGreen"
+              >
+                <input
+                  type="radio"
+                  name="deliveryOption"
+                  value={option.id}
+                  checked={form.deliveryOption === option.id}
+                  onChange={(event) => setField("deliveryOption", event.target.value)}
+                  className="mt-1 accent-brandGreen"
+                />
+                <div className="flex flex-col">
+                  <span className="text-brandGreen">{option.label}</span>
+                  <span className="text-xs text-brandGreen/70">
+                    Cost: R{Number(option.cost ?? 0).toFixed(2)}
+                  </span>
+                </div>
+              </label>
+            ))}
+          </div>
+          {form.deliveryOption === "other" ? (
+            <div className="mt-3">
+              <label className="block text-sm font-semibold text-brandGreen">
+                Please describe your delivery preference
+              </label>
+              <input
+                type="text"
+                className={inputClass}
+                value={form.otherDelivery}
+                onChange={(event) => setField("otherDelivery", event.target.value)}
+                placeholder="e.g. Meet at local pickup point"
+              />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-xl border border-brandGreen/15 bg-white/80 px-4 py-3 text-sm text-brandGreen shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brandGreen/60">
+            Order total (estimate)
+          </p>
+          {orderNumber ? (
+            <p className="text-xs font-mono text-brandGreen/80">Order number: {orderNumber}</p>
+          ) : null}
+          <div className="mt-2 space-y-1">
+            {itemBreakdown.map((line) => (
+              <div key={line.id} className="flex items-center justify-between text-sm">
+                <span>
+                  {line.label} - {line.qty} x R{line.unitPrice.toFixed(2)}
+                </span>
+                <span className="font-semibold">R{line.lineTotal.toFixed(2)}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between border-t border-brandGreen/10 pt-1 text-sm">
+              <span>Subtotal</span>
+              <span className="font-semibold">R{subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span>Delivery</span>
+              <span className="font-semibold">R{deliveryCost.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-base font-bold text-brandGreen">
+              <span>Total</span>
+              <span>R{total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        {error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+        {success ? (
+          <div className="rounded-xl border border-brandGreen/20 bg-white px-4 py-3 text-sm text-brandGreen">
+            {success}
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <span className="text-sm text-brandGreen/70">
+            You can update your order later by reaching out on WhatsApp.
+          </span>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="inline-flex items-center justify-center rounded-full bg-brandGreen px-6 py-3 font-semibold text-white shadow-md transition hover:scale-[1.01] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isSubmitting ? "Submitting..." : "Submit order"}
+          </button>
+        </div>
+      </form>
+
+      {isModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Order submitted"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 text-brandGreen shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold">Order received</h3>
+            <p className="mt-2 text-sm text-brandGreen/80">
+              Thank you! Your order has been submitted. You will receive an email confirmation
+              and updates as we process and update the status of your order.
+            </p>
+            {orderNumber ? (
+              <p className="mt-2 text-sm font-semibold text-brandGreen">
+                Your order number: {orderNumber}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(false)}
+              className="mt-4 w-full rounded-full bg-brandGreen px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:shadow-md"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <a
+        href="https://wa.me/27828910761?text=Hi%2C%20I%20would%20like%20assistance"
+        target="_blank"
+        rel="noreferrer noopener"
+        className="fixed bottom-4 right-4 z-50 flex items-center justify-center gap-2 rounded-full bg-brandCream px-5 py-3 text-sm font-semibold text-brandGreen shadow-xl transition hover:bg-brandCream/90 md:gap-3 md:px-4 md:py-2 md:text-xs"
+        aria-label="Chat with us on WhatsApp"
+      >
+        <img
+          src="/assets/whatsapp-call-icon-psd-editable_314999-3666%20-%20Edited-DksBPxqT.png"
+          alt="WhatsApp"
+          className="h-6 w-6 rounded-full bg-white/20 object-contain"
+        />
+        <span className="hidden md:inline">Send a WhatsApp</span>
+      </a>
+    </div>
+  );
+}

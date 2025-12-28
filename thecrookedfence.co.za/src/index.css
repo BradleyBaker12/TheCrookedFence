@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Nunito Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #f7f4eb;
+  color: #3a5a3c;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #f7f4eb;
+}

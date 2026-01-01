@@ -384,6 +384,14 @@ export default function AdminPage() {
     );
   }
 
+  if (!role) {
+    return (
+      <div className={`${cardClass} p-6 text-sm ${mutedText}`}>
+        Checking permissions...
+      </div>
+    );
+  }
+
   return <AdminDashboard user={user} role={role} />;
 }
 
@@ -496,6 +504,7 @@ function AdminDashboard({ user, role }) {
   const [showAllStockLogs, setShowAllStockLogs] = useState(false);
 
   const [userDraft, setUserDraft] = useState({ email: "", role: "worker", password: "" });
+  const [userRoleEdits, setUserRoleEdits] = useState({});
   const [userMessage, setUserMessage] = useState("");
   const [userError, setUserError] = useState("");
 
@@ -1844,6 +1853,35 @@ function AdminDashboard({ user, role }) {
     } catch (err) {
       console.error("delete user error", err);
       setUserError("Unable to delete account.");
+    }
+  };
+
+  const handleUpdateUserRole = async (targetUser) => {
+    setUserError("");
+    setUserMessage("");
+    if (!isAdmin) return;
+    const selectedRole =
+      userRoleEdits[targetUser.id] ?? targetUser.role ?? "worker";
+    if (!selectedRole) {
+      setUserError("Select a role.");
+      return;
+    }
+    if (selectedRole === targetUser.role) {
+      setUserMessage("Role unchanged.");
+      return;
+    }
+    try {
+      const callable = httpsCallable(functions, "updateAuthUserRole");
+      await callable({ uid: targetUser.id, role: selectedRole });
+      setUserMessage(`Role updated to ${selectedRole}.`);
+      setUserRoleEdits((prev) => {
+        const next = { ...prev };
+        delete next[targetUser.id];
+        return next;
+      });
+    } catch (err) {
+      console.error("update user role error", err);
+      setUserError("Unable to update role.");
     }
   };
 
@@ -3706,7 +3744,28 @@ function AdminDashboard({ user, role }) {
                     <p className="font-semibold text-brandGreen">{account.email}</p>
                     <p className="text-xs text-brandGreen/60">Role: {account.role ?? "-"}</p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className="rounded-full border border-brandGreen/30 bg-white px-3 py-1 text-xs font-semibold text-brandGreen"
+                      value={userRoleEdits[account.id] ?? account.role ?? "worker"}
+                      onChange={(event) =>
+                        setUserRoleEdits((prev) => ({
+                          ...prev,
+                          [account.id]: event.target.value
+                        }))
+                      }
+                    >
+                      <option value="worker">Worker</option>
+                      <option value="admin">Admin</option>
+                      <option value="super_admin">Super admin</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateUserRole(account)}
+                      className="rounded-full border border-brandGreen/30 px-3 py-1 text-xs font-semibold text-brandGreen"
+                    >
+                      Update role
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleToggleUserStatus(account, !account.disabled)}

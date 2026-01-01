@@ -713,6 +713,32 @@ exports.updateAuthUserStatus = functions.https.onCall(async (data, context) => {
   return { uid, disabled };
 });
 
+exports.updateAuthUserRole = functions.https.onCall(async (data, context) => {
+  requireAdmin(context);
+
+  const uid = String(data.uid || "").trim();
+  const role = String(data.role || "").trim();
+  const allowedRoles = new Set(["worker", "admin", "super_admin"]);
+
+  if (!uid || !allowedRoles.has(role)) {
+    throw new functions.https.HttpsError("invalid-argument", "Valid user id and role are required.");
+  }
+
+  const userRecord = await admin.auth().getUser(uid);
+  const claims = { ...(userRecord.customClaims || {}), role };
+  await admin.auth().setCustomUserClaims(uid, claims);
+
+  await db.collection("users").doc(uid).set(
+    {
+      role,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return { uid, role };
+});
+
 exports.deleteAuthUser = functions.https.onCall(async (data, context) => {
   requireAdmin(context);
 
@@ -1009,52 +1035,21 @@ exports.syncAuthUsers = functions.https.onCall(async (_data, context) => {
   } while (nextPageToken);
 
   await chunkedWrite(allUsers, (batch, user) => {
-    const role = user.customClaims?.role ?? null;
+    const claimRole = user.customClaims?.role;
+    const payload = {
+      email: user.email || "",
+      disabled: Boolean(user.disabled),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    if (claimRole) {
+      payload.role = claimRole;
+    }
     const ref = db.collection("users").doc(user.uid);
-    batch.set(
-      ref,
-      {
-        email: user.email || "",
-        role,
-        disabled: Boolean(user.disabled),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
+    batch.set(ref, payload, { merge: true });
   });
 
   return { count: allUsers.length };
 });
-
-exports.userBackfillDaily = functions.pubsub
-  .schedule("0 2 * * *")
-  .timeZone("Africa/Johannesburg")
-  .onRun(async () => {
-    const allUsers = [];
-    let nextPageToken;
-    do {
-      const result = await admin.auth().listUsers(1000, nextPageToken);
-      allUsers.push(...result.users);
-      nextPageToken = result.pageToken;
-    } while (nextPageToken);
-
-    await chunkedWrite(allUsers, (batch, user) => {
-      const role = user.customClaims?.role ?? null;
-      const ref = db.collection("users").doc(user.uid);
-      batch.set(
-        ref,
-        {
-          email: user.email || "",
-          role,
-          disabled: Boolean(user.disabled),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
-    });
-
-    return null;
-  });
 
 exports.promoteAllUsersToAdmin = functions.https.onCall(async (_data, context) => {
   requireAdmin(context);
@@ -1121,40 +1116,4 @@ exports.sendLegacyCorrectionEmails = functions.https.onCall(async (data, context
   }
 
   return { sent: results.length, results };
-});
-
-exports.backfillOrderNumbers = functions.https.onCall(async (data, context) => {
-  requireAdmin(context);
-
-  const collectionName = String(data?.collectionName || "eggOrders");
-  if (!["eggOrders", "livestockOrders"].includes(collectionName)) {
-    throw new functions.https.HttpsError("invalid-argument", "Invalid collection name.");
-  }
-
-  const snap = await db.collection(collectionName).orderBy("createdAt", "asc").get();
-  let lastNumber = 0;
-  const updates = [];
-
-  snap.forEach((docSnap) => {
-    const data = docSnap.data() || {};
-    const existing = data.orderNumber;
-    if (existing) {
-      const parsed = parseOrderNumber(existing);
-      if (parsed > lastNumber) lastNumber = parsed;
-      return;
-    }
-    lastNumber += 1;
-    updates.push({ ref: docSnap.ref, orderNumber: formatOrderNumber(lastNumber) });
-  });
-
-  await chunkedWrite(updates, (batch, update) => {
-    batch.set(update.ref, { orderNumber: update.orderNumber }, { merge: true });
-  });
-
-  await db.collection("orderCounters").doc(collectionName).set(
-    { lastNumber },
-    { merge: true }
-  );
-
-  return { updated: updates.length };
 });

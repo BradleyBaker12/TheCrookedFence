@@ -5,7 +5,7 @@ import {
   getIdTokenResult,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut
+  signOut,
 } from "firebase/auth";
 import {
   addDoc,
@@ -16,10 +16,14 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  updateDoc
+  updateDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import {
+  getDownloadURL,
+  ref as storageRef,
+  uploadBytes,
+} from "firebase/storage";
 import { auth, db, functions, storage } from "../lib/firebase.js";
 import {
   DEFAULT_DELIVERY_OPTIONS,
@@ -31,30 +35,35 @@ import {
   ORDER_STATUSES,
   STATUS_STYLES,
   UNCATEGORIZED_ID,
-  UNCATEGORIZED_LABEL
+  UNCATEGORIZED_LABEL,
 } from "../data/defaults.js";
 
-const cardClass = "bg-brandBeige shadow-lg rounded-2xl border border-brandGreen/10";
-const panelClass = "rounded-2xl border border-brandGreen/10 bg-white/70 p-4 shadow-inner";
+const cardClass =
+  "bg-brandBeige shadow-lg rounded-2xl border border-brandGreen/10";
+const panelClass =
+  "rounded-2xl border border-brandGreen/10 bg-white/70 p-4 shadow-inner";
 const inputClass =
   "w-full rounded-lg border border-brandGreen/30 bg-white px-3 py-2 text-brandGreen placeholder:text-brandGreen/50 focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30";
 const mutedText = "text-brandGreen/70";
 const STOCK_LOG_LIMIT = 25;
+const REPORT_ORDER_STATUSES = ORDER_STATUSES.filter(
+  (status) => status.id !== "archived"
+);
 const INVOICE_BRAND = {
   name: "The Crooked Fence",
   email: "stolschristopher60@gmail.com",
   phone: "082 891 07612",
-  website: "thecrookedfence.co.za"
+  website: "thecrookedfence.co.za",
 };
 const INVOICE_BANK = {
   bank: "FNB/RMB",
   accountName: "The Golden Quail",
   accountType: "Gold Business Account",
   accountNumber: "63049448219",
-  branchCode: "250655"
+  branchCode: "250655",
 };
 const INVOICE_INDEMNITY =
-  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control - such as handling during shipping, incubation conditions, and environmental variables - that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.";
+  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control—such as handling during shipping, incubation conditions, and environmental variables—that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.\n\nAvailability Notice: Some eggs are subject to a 3–6 week waiting period and may not be available for immediate shipment. By placing an order, the buyer acknowledges and accepts this potential delay.\n\nExtra Eggs Disclaimer: Extra eggs are never guaranteed. While we may occasionally include additional eggs when available, this is done at our discretion and should not be expected or assumed as part of any order.";
 const INVOICE_LOGO_PATH = "/TCFLogoWhiteBackground.png";
 
 const formatTimestamp = (value) => {
@@ -64,6 +73,26 @@ const formatTimestamp = (value) => {
   return new Date(value).toLocaleString();
 };
 
+const getTimestampValue = (value) => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (value.toDate) return value.toDate().getTime();
+  if (value.seconds) return value.seconds * 1000;
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const resolveTimestampDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (value.toDate) return value.toDate();
+  if (value.seconds) return new Date(value.seconds * 1000);
+  if (typeof value === "number") return new Date(value);
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
+};
+
 const formatDate = (value) => {
   if (!value) return "-";
   if (value.toDate) return value.toDate().toLocaleDateString();
@@ -71,8 +100,15 @@ const formatDate = (value) => {
   return new Date(value).toLocaleDateString();
 };
 
+const formatDateValue = (value) => {
+  const date = resolveTimestampDate(value);
+  if (!date) return "";
+  return date.toISOString().split("T")[0];
+};
+
 const formatCurrency = (value) => {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  if (value === null || value === undefined || Number.isNaN(Number(value)))
+    return "-";
   return `R${Number(value).toFixed(2)}`;
 };
 
@@ -106,14 +142,16 @@ const buildInvoiceLines = (order) => {
       const quantity = toNumber(item.quantity);
       const specialPrice = item.specialPrice;
       const unitPrice =
-        specialPrice === null || specialPrice === undefined || toNumber(specialPrice) === 0
+        specialPrice === null ||
+        specialPrice === undefined ||
+        toNumber(specialPrice) === 0
           ? toNumber(item.price)
           : toNumber(specialPrice);
       return {
         label: item.label ?? item.name ?? "Item",
         quantity,
         unitPrice,
-        lineTotal: unitPrice * quantity
+        lineTotal: unitPrice * quantity,
       };
     });
 };
@@ -140,7 +178,7 @@ const generateInvoicePdf = async ({
   invoiceNumber,
   invoiceDateLabel,
   deliveryLabel,
-  sendDateLabel
+  sendDateLabel,
 }) => {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -161,10 +199,10 @@ const generateInvoicePdf = async ({
   doc.setFontSize(10);
   doc.setTextColor("#334155");
   doc.text(`Invoice #: ${invoiceNumber}`, pageWidth - marginX, cursorY + 40, {
-    align: "right"
+    align: "right",
   });
   doc.text(`Date: ${invoiceDateLabel}`, pageWidth - marginX, cursorY + 56, {
-    align: "right"
+    align: "right",
   });
 
   doc.setFontSize(11);
@@ -185,7 +223,9 @@ const generateInvoicePdf = async ({
   doc.setFontSize(10);
   doc.setTextColor("#334155");
   const billToLines = doc.splitTextToSize(
-    `${orderFullName || "Customer"}\n${order.email || ""}\n${order.cellphone || ""}`,
+    `${orderFullName || "Customer"}\n${order.email || ""}\n${
+      order.cellphone || ""
+    }`,
     240
   );
   doc.text(billToLines, marginX, cursorY + 16);
@@ -198,10 +238,11 @@ const generateInvoicePdf = async ({
   const lineItems = buildInvoiceLines(order);
   if (lineItems.length === 0) {
     lineItems.push({
-      label: collectionName === "livestockOrders" ? "Livestock order" : "Egg order",
+      label:
+        collectionName === "livestockOrders" ? "Livestock order" : "Egg order",
       quantity: 1,
       unitPrice: toNumber(totalCost),
-      lineTotal: toNumber(totalCost)
+      lineTotal: toNumber(totalCost),
     });
   }
 
@@ -212,7 +253,7 @@ const generateInvoicePdf = async ({
       line.label,
       String(line.quantity),
       formatCurrency(line.unitPrice),
-      formatCurrency(line.lineTotal)
+      formatCurrency(line.lineTotal),
     ]),
     styles: { fontSize: 9, textColor: "#334155" },
     headStyles: { fillColor: "#064e3b", textColor: "#ffffff" },
@@ -220,27 +261,42 @@ const generateInvoicePdf = async ({
     columnStyles: {
       1: { halign: "right", cellWidth: 50 },
       2: { halign: "right", cellWidth: 80 },
-      3: { halign: "right", cellWidth: 90 }
-    }
+      3: { halign: "right", cellWidth: 90 },
+    },
   });
 
   const tableY = doc.lastAutoTable?.finalY ?? cursorY;
   let totalsY = tableY + 16;
   doc.setFontSize(10);
   doc.setTextColor("#334155");
-  doc.text(`Subtotal: ${formatCurrency(eggsTotal)}`, pageWidth - marginX, totalsY, {
-    align: "right"
-  });
+  doc.text(
+    `Subtotal: ${formatCurrency(eggsTotal)}`,
+    pageWidth - marginX,
+    totalsY,
+    {
+      align: "right",
+    }
+  );
   totalsY += 14;
-  doc.text(`Delivery: ${formatCurrency(deliveryCost)}`, pageWidth - marginX, totalsY, {
-    align: "right"
-  });
+  doc.text(
+    `Delivery: ${formatCurrency(deliveryCost)}`,
+    pageWidth - marginX,
+    totalsY,
+    {
+      align: "right",
+    }
+  );
   totalsY += 16;
   doc.setFontSize(12);
   doc.setTextColor("#064e3b");
-  doc.text(`Total: ${formatCurrency(totalCost)}`, pageWidth - marginX, totalsY, {
-    align: "right"
-  });
+  doc.text(
+    `Total: ${formatCurrency(totalCost)}`,
+    pageWidth - marginX,
+    totalsY,
+    {
+      align: "right",
+    }
+  );
 
   doc.setFontSize(10);
   doc.setTextColor("#334155");
@@ -266,21 +322,26 @@ const generateInvoicePdf = async ({
     `Account Name: ${INVOICE_BANK.accountName}`,
     `Account Type: ${INVOICE_BANK.accountType}`,
     `Account Number: ${INVOICE_BANK.accountNumber}`,
-    `Branch Code: ${INVOICE_BANK.branchCode}`
+    `Branch Code: ${INVOICE_BANK.branchCode}`,
   ];
   doc.text(paymentLines, marginX, paymentY + 14);
 
   const indemnityY = paymentY + 80;
   doc.setFontSize(9);
   doc.setTextColor("#334155");
-  const indemnityLines = doc.splitTextToSize(INVOICE_INDEMNITY, pageWidth - marginX * 2);
+  const indemnityLines = doc.splitTextToSize(
+    INVOICE_INDEMNITY,
+    pageWidth - marginX * 2
+  );
   doc.text(indemnityLines, marginX, indemnityY);
 
   return doc.output("blob");
 };
 
 const formatDuration = (totalSeconds) => {
-  const safeSeconds = Number.isFinite(totalSeconds) ? Math.max(0, totalSeconds) : 0;
+  const safeSeconds = Number.isFinite(totalSeconds)
+    ? Math.max(0, totalSeconds)
+    : 0;
   const minutes = Math.floor(safeSeconds / 60);
   const seconds = Math.floor(safeSeconds % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
@@ -292,7 +353,7 @@ const getVoiceNoteMimeType = () => {
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
-    "audio/mp4"
+    "audio/mp4",
   ];
   return options.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
 };
@@ -306,7 +367,8 @@ const extractCost = (label) => {
 const ORDER_ATTACHMENTS = FINANCE_ATTACHMENTS;
 
 const resolveStockUpdateQuantity = (draft, currentQuantity) => {
-  if (!draft || draft.quantity === "" || draft.quantity === undefined) return currentQuantity;
+  if (!draft || draft.quantity === "" || draft.quantity === undefined)
+    return currentQuantity;
   const parsed = Number(draft.quantity);
   return Number.isFinite(parsed) ? parsed : currentQuantity;
 };
@@ -384,13 +446,18 @@ const normalizeLogEntry = (entry = {}) => {
   const qtyText =
     typeof qtySource === "string"
       ? qtySource
-      : entry.qtyText ?? entry.quantityText ?? entry.qtyRange ?? entry.range ?? "";
+      : entry.qtyText ??
+        entry.quantityText ??
+        entry.qtyRange ??
+        entry.range ??
+        "";
   const rangeFromText =
     parseQtyRange(rawFrom) || parseQtyRange(rawTo) || parseQtyRange(qtyText);
 
   let fromQty = rangeFromText ? rangeFromText.from : toNumber(rawFrom);
   let toQty = rangeFromText ? rangeFromText.to : toNumber(rawTo);
-  let hasQtyRange = Boolean(rangeFromText) || rawFrom !== undefined || rawTo !== undefined;
+  let hasQtyRange =
+    Boolean(rangeFromText) || rawFrom !== undefined || rawTo !== undefined;
 
   const rawChange =
     entry.change ??
@@ -408,7 +475,10 @@ const normalizeLogEntry = (entry = {}) => {
   let change = toNumber(rawChange);
   if (hasQtyRange) {
     change = toQty - fromQty;
-  } else if (rawChange === undefined && (rawFrom !== undefined || rawTo !== undefined)) {
+  } else if (
+    rawChange === undefined &&
+    (rawFrom !== undefined || rawTo !== undefined)
+  ) {
     change = toQty - fromQty;
   }
 
@@ -417,12 +487,13 @@ const normalizeLogEntry = (entry = {}) => {
     change,
     fromQty,
     toQty,
-    notes: entry.notes ?? entry.note ?? ""
+    notes: entry.notes ?? entry.note ?? "",
   };
 };
 
 const normalizeEntryList = (entries) => {
-  if (Array.isArray(entries)) return entries.map((entry) => normalizeLogEntry(entry));
+  if (Array.isArray(entries))
+    return entries.map((entry) => normalizeLogEntry(entry));
   if (entries && typeof entries === "object") {
     return Object.values(entries).map((entry) => normalizeLogEntry(entry));
   }
@@ -441,8 +512,8 @@ const getLogEntries = (log) => {
       change: log.change,
       fromQty: log.fromQty,
       toQty: log.toQty,
-      notes: log.notes
-    })
+      notes: log.notes,
+    }),
   ];
 };
 
@@ -462,6 +533,66 @@ const getChangeColor = (value) => {
 
 const createLineId = () =>
   `line_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+const createBatchId = () =>
+  `batch_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+const getStockUpdateGroupKey = (log) => {
+  if (log.batchId) return `batch:${log.batchId}`;
+  if (log.voiceNoteName) return `voice:${log.voiceNoteName}`;
+  const timestamp = getTimestampValue(log.batchCreatedAt ?? log.createdAt);
+  if (!timestamp) return `log:${log.id}`;
+  const user = log.userEmail ?? log.updatedBy ?? "unknown";
+  return `time:${Math.floor(timestamp / 1000)}|user:${user}`;
+};
+
+const groupStockLogs = (logs) => {
+  const grouped = new Map();
+
+  logs.forEach((log) => {
+    if (log.logType !== "stockUpdateLogs") {
+      grouped.set(`log:${log.id}`, log);
+      return;
+    }
+
+    const key = getStockUpdateGroupKey(log);
+    const existing = grouped.get(key);
+    const entries = getLogEntries(log);
+
+    if (!existing) {
+      grouped.set(key, {
+        ...log,
+        entries: [...entries],
+        summary: undefined,
+        name: undefined,
+        createdAt: log.batchCreatedAt ?? log.createdAt,
+      });
+      return;
+    }
+
+    existing.entries = existing.entries
+      ? existing.entries.concat(entries)
+      : entries;
+    existing.summary = undefined;
+    existing.name = undefined;
+
+    const existingTs = getTimestampValue(existing.createdAt);
+    const logTs = getTimestampValue(log.batchCreatedAt ?? log.createdAt);
+    if (logTs > existingTs) {
+      existing.createdAt = log.batchCreatedAt ?? log.createdAt;
+    }
+
+    if (existing.userEmail && log.userEmail && existing.userEmail !== log.userEmail) {
+      existing.userEmail = "Multiple";
+    } else if (!existing.userEmail) {
+      existing.userEmail = log.userEmail ?? log.updatedBy ?? "";
+    }
+  });
+
+  return Array.from(grouped.values()).sort(
+    (a, b) => getTimestampValue(b.createdAt) - getTimestampValue(a.createdAt)
+  );
+};
 
 const useAuthRole = () => {
   const [user, setUser] = useState(null);
@@ -504,7 +635,9 @@ export default function AdminPage() {
   useEffect(() => {
     if (!user) return;
     const ensureProfile = httpsCallable(functions, "ensureCurrentUserProfile");
-    ensureProfile().catch((err) => console.error("ensureCurrentUserProfile error", err));
+    ensureProfile().catch((err) =>
+      console.error("ensureCurrentUserProfile error", err)
+    );
   }, [user]);
 
   useEffect(() => {
@@ -526,7 +659,11 @@ export default function AdminPage() {
     setLoginError("");
     setLoginLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, loginForm.email.trim(), loginForm.password);
+      await signInWithEmailAndPassword(
+        auth,
+        loginForm.email.trim(),
+        loginForm.password
+      );
       setLoginForm({ email: "", password: "" });
     } catch (err) {
       console.error("login error", err);
@@ -555,7 +692,9 @@ export default function AdminPage() {
         </div>
         <form onSubmit={handleLogin} className={`${cardClass} space-y-4 p-6`}>
           <div className="space-y-2">
-            <label className="text-sm font-semibold text-brandGreen">Email</label>
+            <label className="text-sm font-semibold text-brandGreen">
+              Email
+            </label>
             <input
               type="email"
               className={inputClass}
@@ -567,13 +706,18 @@ export default function AdminPage() {
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-semibold text-brandGreen">Password</label>
+            <label className="text-sm font-semibold text-brandGreen">
+              Password
+            </label>
             <input
               type="password"
               className={inputClass}
               value={loginForm.password}
               onChange={(event) =>
-                setLoginForm((prev) => ({ ...prev, password: event.target.value }))
+                setLoginForm((prev) => ({
+                  ...prev,
+                  password: event.target.value,
+                }))
               }
               required
             />
@@ -648,9 +792,14 @@ function AdminDashboard({ user, role }) {
   const [orderActionMessage, setOrderActionMessage] = useState("");
 
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [selectedOrderCollection, setSelectedOrderCollection] = useState("eggOrders");
+  const [selectedOrderCollection, setSelectedOrderCollection] =
+    useState("eggOrders");
 
-  const [eggDraft, setEggDraft] = useState({ label: "", price: "", specialPrice: "" });
+  const [eggDraft, setEggDraft] = useState({
+    label: "",
+    price: "",
+    specialPrice: "",
+  });
   const [eggEdits, setEggEdits] = useState({});
   const [eggMessage, setEggMessage] = useState("");
   const [eggError, setEggError] = useState("");
@@ -662,13 +811,16 @@ function AdminDashboard({ user, role }) {
 
   const [livestockDeliveryDraft, setLivestockDeliveryDraft] = useState({
     label: "",
-    cost: ""
+    cost: "",
   });
   const [livestockDeliveryEdits, setLivestockDeliveryEdits] = useState({});
   const [livestockDeliveryMessage, setLivestockDeliveryMessage] = useState("");
   const [livestockDeliveryError, setLivestockDeliveryError] = useState("");
 
-  const [categoryDraft, setCategoryDraft] = useState({ name: "", description: "" });
+  const [categoryDraft, setCategoryDraft] = useState({
+    name: "",
+    description: "",
+  });
   const [categoryMessage, setCategoryMessage] = useState("");
   const [categoryError, setCategoryError] = useState("");
 
@@ -676,7 +828,7 @@ function AdminDashboard({ user, role }) {
     label: "",
     price: "",
     specialPrice: "",
-    categoryId: ""
+    categoryId: "",
   });
   const [livestockEdits, setLivestockEdits] = useState({});
   const [livestockMessage, setLivestockMessage] = useState("");
@@ -692,14 +844,15 @@ function AdminDashboard({ user, role }) {
     subCategory: "",
     quantity: "",
     threshold: "5",
-    notes: ""
+    notes: "",
   });
   const [stockItemError, setStockItemError] = useState("");
 
   const [stockSearch, setStockSearch] = useState("");
   const [stockSort, setStockSort] = useState("name_asc");
   const [stockCategoryFilter, setStockCategoryFilter] = useState("all");
-  const [stockUpdateCategoryFilter, setStockUpdateCategoryFilter] = useState("all");
+  const [stockUpdateCategoryFilter, setStockUpdateCategoryFilter] =
+    useState("all");
   const [stockUpdateDrafts, setStockUpdateDrafts] = useState({});
   const [stockUpdateSubmitting, setStockUpdateSubmitting] = useState(false);
   const [voiceNote, setVoiceNote] = useState(null);
@@ -712,9 +865,13 @@ function AdminDashboard({ user, role }) {
   const recordingTimerRef = useRef(null);
   const recordingStartRef = useRef(null);
   const [stockLogSearch, setStockLogSearch] = useState("");
-  const [showAllStockLogs, setShowAllStockLogs] = useState(false);
+  const [showAllStockLogs, setShowAllStockLogs] = useState(true);
 
-  const [userDraft, setUserDraft] = useState({ email: "", role: "worker", password: "" });
+  const [userDraft, setUserDraft] = useState({
+    email: "",
+    role: "worker",
+    password: "",
+  });
   const [userRoleEdits, setUserRoleEdits] = useState({});
   const [userMessage, setUserMessage] = useState("");
   const [userError, setUserError] = useState("");
@@ -724,7 +881,7 @@ function AdminDashboard({ user, role }) {
     amount: "",
     description: "",
     date: new Date().toISOString().split("T")[0],
-    file: null
+    file: null,
   });
   const [financeTimeScope, setFinanceTimeScope] = useState("month");
   const [financeMonth, setFinanceMonth] = useState(
@@ -738,6 +895,28 @@ function AdminDashboard({ user, role }) {
   const [showFinanceForm, setShowFinanceForm] = useState(false);
   const [financeMessage, setFinanceMessage] = useState("");
   const [financeError, setFinanceError] = useState("");
+  const [reportTimeScope, setReportTimeScope] = useState("month");
+  const [reportDay, setReportDay] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+  const [reportWeekStart, setReportWeekStart] = useState(
+    new Date().toISOString().split("T")[0]
+  );
+  const [reportMonth, setReportMonth] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
+  const [reportYear, setReportYear] = useState(
+    new Date().getFullYear().toString()
+  );
+  const [reportCustomStart, setReportCustomStart] = useState("");
+  const [reportCustomEnd, setReportCustomEnd] = useState("");
+  const [reportPaidFilter, setReportPaidFilter] = useState("all");
+  const [reportOrderType, setReportOrderType] = useState("all");
+  const [reportStatusFilter, setReportStatusFilter] = useState(() =>
+    REPORT_ORDER_STATUSES.map((status) => status.id)
+  );
+  const [reportIncludeArchived, setReportIncludeArchived] = useState(false);
+  const [reportShowFilters, setReportShowFilters] = useState(true);
 
   useEffect(() => {
     return () => {
@@ -765,7 +944,10 @@ function AdminDashboard({ user, role }) {
     const unsubEggOrders = onSnapshot(
       query(collection(db, "eggOrders"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setEggOrders(data);
       }
     );
@@ -773,7 +955,10 @@ function AdminDashboard({ user, role }) {
     const unsubLivestockOrders = onSnapshot(
       query(collection(db, "livestockOrders"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setLivestockOrders(data);
       }
     );
@@ -781,7 +966,10 @@ function AdminDashboard({ user, role }) {
     const unsubEggTypes = onSnapshot(
       query(collection(db, "eggTypes"), orderBy("order", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setEggTypes(data);
       }
     );
@@ -789,15 +977,24 @@ function AdminDashboard({ user, role }) {
     const unsubDelivery = onSnapshot(
       query(collection(db, "deliveryOptions"), orderBy("order", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setDeliveryOptions(data);
       }
     );
 
     const unsubLivestockDelivery = onSnapshot(
-      query(collection(db, "livestockDeliveryOptions"), orderBy("order", "asc")),
+      query(
+        collection(db, "livestockDeliveryOptions"),
+        orderBy("order", "asc")
+      ),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setLivestockDeliveryOptions(data);
       }
     );
@@ -805,7 +1002,10 @@ function AdminDashboard({ user, role }) {
     const unsubLivestockCategories = onSnapshot(
       query(collection(db, "livestockCategories"), orderBy("name", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setLivestockCategories(data);
       }
     );
@@ -813,7 +1013,10 @@ function AdminDashboard({ user, role }) {
     const unsubLivestockTypes = onSnapshot(
       query(collection(db, "livestockTypes"), orderBy("order", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setLivestockTypes(data);
       }
     );
@@ -821,7 +1024,10 @@ function AdminDashboard({ user, role }) {
     const unsubStockItems = onSnapshot(
       query(collection(db, "stockItems"), orderBy("name", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setStockItems(data);
       }
     );
@@ -829,7 +1035,10 @@ function AdminDashboard({ user, role }) {
     const unsubStockLogs = onSnapshot(
       query(collection(db, "stockLogs"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setStockLogs(data);
       }
     );
@@ -837,7 +1046,10 @@ function AdminDashboard({ user, role }) {
     const unsubStockUpdateLogs = onSnapshot(
       query(collection(db, "stockUpdateLogs"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setStockUpdateLogs(data);
       }
     );
@@ -845,7 +1057,10 @@ function AdminDashboard({ user, role }) {
     const unsubStockCategories = onSnapshot(
       query(collection(db, "stockCategories"), orderBy("name", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setStockCategories(data);
       }
     );
@@ -853,7 +1068,10 @@ function AdminDashboard({ user, role }) {
     const unsubUsers = onSnapshot(
       query(collection(db, "users"), orderBy("email", "asc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setUsers(data);
       }
     );
@@ -861,7 +1079,10 @@ function AdminDashboard({ user, role }) {
     const unsubFinance = onSnapshot(
       query(collection(db, "financeEntries"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const data = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
         setFinanceEntries(data);
       }
     );
@@ -885,19 +1106,27 @@ function AdminDashboard({ user, role }) {
 
   const deliveryLookup = useMemo(() => {
     const lookup = new Map();
-    const options = deliveryOptions.length > 0 ? deliveryOptions : DEFAULT_DELIVERY_OPTIONS;
-    options.forEach((option) => lookup.set(option.id, Number(option.cost ?? 0)));
+    const options =
+      deliveryOptions.length > 0 ? deliveryOptions : DEFAULT_DELIVERY_OPTIONS;
+    options.forEach((option) =>
+      lookup.set(option.id, Number(option.cost ?? 0))
+    );
     return lookup;
   }, [deliveryOptions]);
 
   const hydrateOrders = (orders, fallbackOptions) => {
     const fallbackLookup = new Map();
-    fallbackOptions.forEach((option) => fallbackLookup.set(option.id, option.cost));
+    fallbackOptions.forEach((option) =>
+      fallbackLookup.set(option.id, option.cost)
+    );
 
     return orders.map((order) => {
       const eggs = Array.isArray(order.eggs) ? order.eggs : [];
       const eggsTotal = eggs.reduce((sum, item) => {
-        const price = item.specialPrice == null || item.specialPrice === 0 ? item.price : item.specialPrice;
+        const price =
+          item.specialPrice == null || item.specialPrice === 0
+            ? item.price
+            : item.specialPrice;
         return sum + Number(price ?? 0) * Number(item.quantity ?? 0);
       }, 0);
 
@@ -912,8 +1141,8 @@ function AdminDashboard({ user, role }) {
       const createdAtDate = order.createdAt?.toDate
         ? order.createdAt.toDate()
         : order.createdAt?.seconds
-          ? new Date(order.createdAt.seconds * 1000)
-          : null;
+        ? new Date(order.createdAt.seconds * 1000)
+        : null;
 
       return {
         ...order,
@@ -929,7 +1158,7 @@ function AdminDashboard({ user, role }) {
           eggs
             .filter((item) => (item.quantity ?? 0) > 0)
             .map((item) => `${item.label} x ${item.quantity}`)
-            .join(", ") || "-"
+            .join(", ") || "-",
       };
     });
   };
@@ -945,7 +1174,9 @@ function AdminDashboard({ user, role }) {
   );
 
   const resolvedEggDeliveryOptions =
-    deliveryOptions.length > 0 ? deliveryOptions : DEFAULT_FORM_DELIVERY_OPTIONS;
+    deliveryOptions.length > 0
+      ? deliveryOptions
+      : DEFAULT_FORM_DELIVERY_OPTIONS;
   const resolvedLivestockDeliveryOptions =
     livestockDeliveryOptions.length > 0
       ? livestockDeliveryOptions
@@ -976,7 +1207,7 @@ function AdminDashboard({ user, role }) {
           order.email,
           order.cellphone,
           order.deliveryOption,
-          order.eggSummary
+          order.eggSummary,
         ]
           .filter(Boolean)
           .join(" ")
@@ -990,15 +1221,27 @@ function AdminDashboard({ user, role }) {
           case "orderNumberDesc":
             return String(b.orderNumber).localeCompare(String(a.orderNumber));
           case "createdAsc":
-            return (a.createdAtDate?.getTime() ?? 0) - (b.createdAtDate?.getTime() ?? 0);
+            return (
+              (a.createdAtDate?.getTime() ?? 0) -
+              (b.createdAtDate?.getTime() ?? 0)
+            );
           case "createdDesc":
-            return (b.createdAtDate?.getTime() ?? 0) - (a.createdAtDate?.getTime() ?? 0);
+            return (
+              (b.createdAtDate?.getTime() ?? 0) -
+              (a.createdAtDate?.getTime() ?? 0)
+            );
           case "sendDateAsc":
-            return String(a.sendDate ?? "").localeCompare(String(b.sendDate ?? ""));
+            return String(a.sendDate ?? "").localeCompare(
+              String(b.sendDate ?? "")
+            );
           case "sendDateDesc":
-            return String(b.sendDate ?? "").localeCompare(String(a.sendDate ?? ""));
+            return String(b.sendDate ?? "").localeCompare(
+              String(a.sendDate ?? "")
+            );
           case "status":
-            return String(a.orderStatus ?? "").localeCompare(String(b.orderStatus ?? ""));
+            return String(a.orderStatus ?? "").localeCompare(
+              String(b.orderStatus ?? "")
+            );
           case "totalAsc":
             return (a.totalCost ?? 0) - (b.totalCost ?? 0);
           case "totalDesc":
@@ -1026,7 +1269,12 @@ function AdminDashboard({ user, role }) {
         : enrichedEggOrders;
     const updated = source.find((item) => item.id === selectedOrder.id);
     if (updated && updated !== selectedOrder) setSelectedOrder(updated);
-  }, [selectedOrder, selectedOrderCollection, enrichedEggOrders, enrichedLivestockOrders]);
+  }, [
+    selectedOrder,
+    selectedOrderCollection,
+    enrichedEggOrders,
+    enrichedLivestockOrders,
+  ]);
 
   const stockCategoryLookup = useMemo(() => {
     const lookup = new Map();
@@ -1039,9 +1287,13 @@ function AdminDashboard({ user, role }) {
   const stockCategoryOptions = useMemo(() => {
     const options = stockCategories.map((category) => ({
       id: category.id,
-      name: category.name ?? "Unnamed"
+      name: category.name ?? "Unnamed",
     }));
-    return [{ id: "all", name: "All categories" }, ...options, { id: UNCATEGORIZED_ID, name: UNCATEGORIZED_LABEL }];
+    return [
+      { id: "all", name: "All categories" },
+      ...options,
+      { id: UNCATEGORIZED_ID, name: UNCATEGORIZED_LABEL },
+    ];
   }, [stockCategories]);
 
   const filteredStockItems = useMemo(() => {
@@ -1084,9 +1336,12 @@ function AdminDashboard({ user, role }) {
     stockItems.forEach((item) => {
       const categoryName = item.category?.trim();
       const key =
-        item.categoryId || (categoryName ? `name:${categoryName}` : UNCATEGORIZED_ID);
+        item.categoryId ||
+        (categoryName ? `name:${categoryName}` : UNCATEGORIZED_ID);
       const label =
-        stockCategoryLookup.get(item.categoryId) ?? categoryName ?? UNCATEGORIZED_LABEL;
+        stockCategoryLookup.get(item.categoryId) ??
+        categoryName ??
+        UNCATEGORIZED_LABEL;
       categoryMap.set(key, label);
     });
     const sorted = Array.from(categoryMap.entries())
@@ -1107,25 +1362,41 @@ function AdminDashboard({ user, role }) {
     const categoryMap = new Map();
     const getCategoryKey = (item) => {
       const categoryName = item.category?.trim();
-      return item.categoryId || (categoryName ? `name:${categoryName}` : UNCATEGORIZED_ID);
+      return (
+        item.categoryId ||
+        (categoryName ? `name:${categoryName}` : UNCATEGORIZED_ID)
+      );
     };
     const getCategoryLabel = (item) => {
       const categoryName = item.category?.trim();
-      return stockCategoryLookup.get(item.categoryId) ?? categoryName ?? UNCATEGORIZED_LABEL;
+      return (
+        stockCategoryLookup.get(item.categoryId) ??
+        categoryName ??
+        UNCATEGORIZED_LABEL
+      );
     };
 
     stockItems.forEach((item) => {
       const categoryKey = getCategoryKey(item);
-      if (stockUpdateCategoryFilter !== "all" && categoryKey !== stockUpdateCategoryFilter) {
+      if (
+        stockUpdateCategoryFilter !== "all" &&
+        categoryKey !== stockUpdateCategoryFilter
+      ) {
         return;
       }
       const categoryLabel = getCategoryLabel(item);
       const subLabel = item.subCategory?.trim() || "Items";
-      const categoryGroup =
-        categoryMap.get(categoryKey) ?? { key: categoryKey, label: categoryLabel, subGroups: new Map() };
+      const categoryGroup = categoryMap.get(categoryKey) ?? {
+        key: categoryKey,
+        label: categoryLabel,
+        subGroups: new Map(),
+      };
       const subKey = subLabel.toLowerCase();
-      const subGroup =
-        categoryGroup.subGroups.get(subKey) ?? { key: subKey, label: subLabel, items: [] };
+      const subGroup = categoryGroup.subGroups.get(subKey) ?? {
+        key: subKey,
+        label: subLabel,
+        items: [],
+      };
 
       subGroup.items.push(item);
       categoryGroup.subGroups.set(subKey, subGroup);
@@ -1139,7 +1410,9 @@ function AdminDashboard({ user, role }) {
             ...group,
             items: group.items
               .slice()
-              .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
+              .sort((a, b) =>
+                String(a.name ?? "").localeCompare(String(b.name ?? ""))
+              ),
           }))
           .sort((a, b) => a.label.localeCompare(b.label));
         return { ...category, subGroups };
@@ -1159,9 +1432,20 @@ function AdminDashboard({ user, role }) {
     });
   }, [stockItems, stockUpdateDrafts]);
 
+  const allStockLogs = useMemo(() => {
+    const merged = [
+      ...stockLogs.map((log) => ({ ...log, logType: "stockLogs" })),
+      ...stockUpdateLogs.map((log) => ({ ...log, logType: "stockUpdateLogs" })),
+    ];
+    return groupStockLogs(merged);
+  }, [stockLogs, stockUpdateLogs]);
+
   const visibleStockLogs = useMemo(
-    () => (showAllStockLogs ? stockLogs : stockLogs.slice(0, STOCK_LOG_LIMIT)),
-    [stockLogs, showAllStockLogs]
+    () =>
+      showAllStockLogs
+        ? allStockLogs
+        : allStockLogs.slice(0, STOCK_LOG_LIMIT),
+    [allStockLogs, showAllStockLogs]
   );
 
   const filteredStockLogs = useMemo(() => {
@@ -1176,7 +1460,7 @@ function AdminDashboard({ user, role }) {
             entry.notes,
             formatChangeValue(entry.change),
             entry.fromQty,
-            entry.toQty
+            entry.toQty,
           ]
             .filter(Boolean)
             .join(" ")
@@ -1191,7 +1475,7 @@ function AdminDashboard({ user, role }) {
         formatChangeValue(toNumber(log.change)),
         log.fromQty,
         log.toQty,
-        entryText
+        entryText,
       ]
         .filter(Boolean)
         .join(" ")
@@ -1200,15 +1484,178 @@ function AdminDashboard({ user, role }) {
     });
   }, [visibleStockLogs, stockLogSearch]);
 
-  const ordersSummary = useMemo(() => {
-    const allOrders = [...enrichedEggOrders, ...enrichedLivestockOrders];
-    const totalValue = allOrders.reduce((sum, order) => sum + (order.totalCost ?? 0), 0);
-    return {
-      totalOrders: allOrders.length,
-      totalValue,
-      paidCount: allOrders.filter((order) => order.paid).length
+  const allReportOrders = useMemo(
+    () => [
+      ...enrichedEggOrders.map((order) => ({ ...order, orderType: "eggs" })),
+      ...enrichedLivestockOrders.map((order) => ({
+        ...order,
+        orderType: "livestock",
+      })),
+    ],
+    [enrichedEggOrders, enrichedLivestockOrders]
+  );
+
+  const reportDateRange = useMemo(() => {
+    const parseDateValue = (value) => {
+      if (!value) return null;
+      const date = new Date(`${value}T00:00:00`);
+      return Number.isNaN(date.getTime()) ? null : date;
     };
-  }, [enrichedEggOrders, enrichedLivestockOrders]);
+    const parseMonthValue = (value) => {
+      if (!value) return null;
+      const [year, month] = value.split("-").map(Number);
+      if (!year || !month) return null;
+      return new Date(year, month - 1, 1);
+    };
+
+    let start = null;
+    let end = null;
+
+    switch (reportTimeScope) {
+      case "day": {
+        start = parseDateValue(reportDay);
+        if (start) {
+          end = new Date(start);
+          end.setDate(start.getDate() + 1);
+        }
+        break;
+      }
+      case "week": {
+        start = parseDateValue(reportWeekStart);
+        if (start) {
+          end = new Date(start);
+          end.setDate(start.getDate() + 7);
+        }
+        break;
+      }
+      case "year": {
+        const year = Number(reportYear);
+        if (Number.isFinite(year)) {
+          start = new Date(year, 0, 1);
+          end = new Date(year + 1, 0, 1);
+        }
+        break;
+      }
+      case "custom": {
+        const customStart = parseDateValue(reportCustomStart);
+        const customEnd = parseDateValue(reportCustomEnd);
+        if (customStart && customEnd) {
+          start = customStart;
+          end = new Date(customEnd);
+          end.setDate(customEnd.getDate() + 1);
+        }
+        break;
+      }
+      case "month":
+      default: {
+        start = parseMonthValue(reportMonth);
+        if (start) {
+          end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+        }
+        break;
+      }
+    }
+
+    if (!start || !end) return null;
+    return { start, end };
+  }, [
+    reportTimeScope,
+    reportDay,
+    reportWeekStart,
+    reportMonth,
+    reportYear,
+    reportCustomStart,
+    reportCustomEnd,
+  ]);
+
+  const reportOrders = useMemo(() => {
+    const statusSet = new Set(reportStatusFilter);
+    const hasStatusFilter = statusSet.size > 0;
+    return allReportOrders.filter((order) => {
+      const orderDate =
+        order.createdAtDate ?? resolveTimestampDate(order.createdAt);
+      if (reportDateRange) {
+        if (!orderDate) return false;
+        if (
+          orderDate < reportDateRange.start ||
+          orderDate >= reportDateRange.end
+        ) {
+          return false;
+        }
+      }
+      if (reportOrderType !== "all" && order.orderType !== reportOrderType) {
+        return false;
+      }
+      if (reportPaidFilter === "paid" && !order.paid) return false;
+      if (reportPaidFilter === "unpaid" && order.paid) return false;
+
+      if (order.orderStatus === "archived") {
+        return reportIncludeArchived;
+      }
+      if (hasStatusFilter && !statusSet.has(order.orderStatus ?? "pending")) {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    allReportOrders,
+    reportDateRange,
+    reportOrderType,
+    reportPaidFilter,
+    reportStatusFilter,
+    reportIncludeArchived,
+  ]);
+
+  const archivedReportOrders = useMemo(() => {
+    return allReportOrders.filter((order) => {
+      if (order.orderStatus !== "archived") return false;
+      const orderDate =
+        order.createdAtDate ?? resolveTimestampDate(order.createdAt);
+      if (reportDateRange) {
+        if (!orderDate) return false;
+        if (
+          orderDate < reportDateRange.start ||
+          orderDate >= reportDateRange.end
+        ) {
+          return false;
+        }
+      }
+      if (reportOrderType !== "all" && order.orderType !== reportOrderType) {
+        return false;
+      }
+      if (reportPaidFilter === "paid" && !order.paid) return false;
+      if (reportPaidFilter === "unpaid" && order.paid) return false;
+      return true;
+    });
+  }, [allReportOrders, reportDateRange, reportOrderType, reportPaidFilter]);
+
+  const archivedOrdersSummary = useMemo(() => {
+    const totalValue = archivedReportOrders.reduce(
+      (sum, order) => sum + (order.totalCost ?? 0),
+      0
+    );
+    return {
+      totalOrders: archivedReportOrders.length,
+      totalValue,
+    };
+  }, [archivedReportOrders]);
+
+  const ordersSummary = useMemo(() => {
+    const totalValue = reportOrders.reduce(
+      (sum, order) => sum + (order.totalCost ?? 0),
+      0
+    );
+    return {
+      totalOrders: reportOrders.length,
+      totalValue,
+      paidCount: reportOrders.filter((order) => order.paid).length,
+    };
+  }, [reportOrders]);
+
+  const financeOrders = useMemo(
+    () => allReportOrders.filter((order) => order.orderStatus !== "archived"),
+    [allReportOrders]
+  );
 
   const readyDispatchEggCount = useMemo(() => {
     const readyStatuses = new Set(["packed", "scheduled_dispatch"]);
@@ -1225,13 +1672,58 @@ function AdminDashboard({ user, role }) {
 
   const resolveFinanceEntryDate = (entry) => {
     if (entry.date) return new Date(`${entry.date}T00:00:00`);
-    if (entry.createdAt?.toDate) return entry.createdAt.toDate();
-    if (entry.createdAt?.seconds) return new Date(entry.createdAt.seconds * 1000);
-    return null;
+    return resolveTimestampDate(entry.createdAt);
   };
 
+  const resolveOrderIncomeDate = (order) => {
+    if (order.orderStatus === "completed") {
+      const completed = resolveTimestampDate(order.completedAt);
+      if (completed) return completed;
+    }
+    if (order.paid) {
+      const paid = resolveTimestampDate(order.paidAt);
+      if (paid) return paid;
+    }
+    return resolveTimestampDate(order.createdAtDate ?? order.createdAt);
+  };
+
+  const orderIncomeEntries = useMemo(() => {
+    return financeOrders
+      .filter((order) => order.orderStatus !== "cancelled")
+      .filter((order) => order.orderStatus === "completed" || order.paid)
+      .map((order) => {
+        const amount = toNumber(order.totalCost);
+        const orderDate = resolveOrderIncomeDate(order);
+        const customer = [order.name, order.surname]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        const orderLabel = order.orderNumber
+          ? `Order ${order.orderNumber}`
+          : "Order";
+        const description = [orderLabel, customer].filter(Boolean).join(" · ");
+        return {
+          id: `order-${order.id}`,
+          type: "income",
+          amount,
+          description: description || "Order income",
+          date: formatDateValue(orderDate),
+          createdAt: orderDate ?? null,
+          source: "order",
+          orderId: order.id,
+          orderNumber: order.orderNumber ?? "",
+        };
+      })
+      .filter((entry) => entry.amount !== 0);
+  }, [financeOrders]);
+
+  const combinedFinanceEntries = useMemo(
+    () => [...financeEntries, ...orderIncomeEntries],
+    [financeEntries, orderIncomeEntries]
+  );
+
   const financeSummary = useMemo(() => {
-    return financeEntries.reduce(
+    return combinedFinanceEntries.reduce(
       (totals, entry) => {
         const amount = Number(entry.amount ?? 0);
         if (entry.type === "income") totals.income += amount;
@@ -1240,7 +1732,7 @@ function AdminDashboard({ user, role }) {
       },
       { income: 0, expense: 0 }
     );
-  }, [financeEntries]);
+  }, [combinedFinanceEntries]);
   const financeSummaryBalance = financeSummary.income - financeSummary.expense;
 
   const financeDateRange = useMemo(() => {
@@ -1251,7 +1743,9 @@ function AdminDashboard({ user, role }) {
       if (!year || !month) return null;
       return new Date(year, month - 1, 1);
     };
-    const monthStart = parseMonthValue(financeMonth) || new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthStart =
+      parseMonthValue(financeMonth) ||
+      new Date(now.getFullYear(), now.getMonth(), 1);
     let start;
     let end;
     switch (financeTimeScope) {
@@ -1287,12 +1781,20 @@ function AdminDashboard({ user, role }) {
     const maxAmount = financeMaxAmount === "" ? null : Number(financeMaxAmount);
     const { start, end } = financeDateRange;
 
-    const filtered = financeEntries.filter((entry) => {
+    const filtered = combinedFinanceEntries.filter((entry) => {
       const amount = Number(entry.amount ?? 0);
-      if (minAmount !== null && Number.isFinite(minAmount) && amount < minAmount) {
+      if (
+        minAmount !== null &&
+        Number.isFinite(minAmount) &&
+        amount < minAmount
+      ) {
         return false;
       }
-      if (maxAmount !== null && Number.isFinite(maxAmount) && amount > maxAmount) {
+      if (
+        maxAmount !== null &&
+        Number.isFinite(maxAmount) &&
+        amount > maxAmount
+      ) {
         return false;
       }
       if (financeHasReceipt && !entry.attachmentUrl) return false;
@@ -1320,12 +1822,12 @@ function AdminDashboard({ user, role }) {
       }
     });
   }, [
-    financeEntries,
+    combinedFinanceEntries,
     financeDateRange,
     financeMinAmount,
     financeMaxAmount,
     financeHasReceipt,
-    financeSort
+    financeSort,
   ]);
 
   const financeTotals = useMemo(() => {
@@ -1350,13 +1852,20 @@ function AdminDashboard({ user, role }) {
   );
   const financeBalance = financeTotals.income - financeTotals.expense;
 
-  const reportOrders = useMemo(
-    () => [...enrichedEggOrders, ...enrichedLivestockOrders],
-    [enrichedEggOrders, enrichedLivestockOrders]
-  );
+  const reportStatusOptions = useMemo(() => {
+    if (reportStatusFilter.length === 0) {
+      return reportIncludeArchived ? ORDER_STATUSES : REPORT_ORDER_STATUSES;
+    }
+    const selected = new Set(reportStatusFilter);
+    const base = reportIncludeArchived ? ORDER_STATUSES : REPORT_ORDER_STATUSES;
+    return base.filter((status) => {
+      if (status.id === "archived") return reportIncludeArchived;
+      return selected.has(status.id);
+    });
+  }, [reportIncludeArchived, reportStatusFilter]);
 
   const orderStatusDistribution = useMemo(() => {
-    const counts = ORDER_STATUSES.reduce((acc, status) => {
+    const counts = reportStatusOptions.reduce((acc, status) => {
       acc[status.id] = 0;
       return acc;
     }, {});
@@ -1368,15 +1877,15 @@ function AdminDashboard({ user, role }) {
       counts[status] += 1;
     });
     const maxCount = Math.max(0, ...Object.values(counts));
-    return ORDER_STATUSES.map((status) => {
+    return reportStatusOptions.map((status) => {
       const count = counts[status.id] ?? 0;
       const percent = maxCount === 0 ? 0 : Math.round((count / maxCount) * 100);
       return { ...status, count, percent };
     });
-  }, [reportOrders]);
+  }, [reportOrders, reportStatusOptions]);
 
   const orderStatusAverageDays = useMemo(() => {
-    const totals = ORDER_STATUSES.reduce((acc, status) => {
+    const totals = reportStatusOptions.reduce((acc, status) => {
       acc[status.id] = { count: 0, sumDays: 0 };
       return acc;
     }, {});
@@ -1390,12 +1899,12 @@ function AdminDashboard({ user, role }) {
       totals[status].count += 1;
       totals[status].sumDays += days;
     });
-    return ORDER_STATUSES.map((status) => {
+    return reportStatusOptions.map((status) => {
       const entry = totals[status.id] ?? { count: 0, sumDays: 0 };
       const avg = entry.count ? entry.sumDays / entry.count : 0;
       return { ...status, avgDays: avg };
     });
-  }, [reportOrders]);
+  }, [reportOrders, reportStatusOptions]);
 
   const stockSummary = useMemo(() => {
     const totalItems = stockItems.length;
@@ -1429,7 +1938,10 @@ function AdminDashboard({ user, role }) {
     const visible = entries.slice(0, maxRows);
     const remaining = entries.slice(maxRows);
     if (remaining.length > 0) {
-      const otherTotal = remaining.reduce((sum, entry) => sum + entry.quantity, 0);
+      const otherTotal = remaining.reduce(
+        (sum, entry) => sum + entry.quantity,
+        0
+      );
       visible.push({ label: "Other", quantity: otherTotal });
     }
     return visible;
@@ -1437,12 +1949,24 @@ function AdminDashboard({ user, role }) {
 
   const financeTrend = useMemo(() => {
     const totals = new Map();
-    financeEntries.forEach((entry) => {
+    combinedFinanceEntries.forEach((entry) => {
       const date = resolveFinanceEntryDate(entry);
       if (!date) return;
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-      const label = date.toLocaleString("en-US", { month: "short", year: "numeric" });
-      const current = totals.get(key) ?? { key, label, income: 0, expense: 0, date };
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}`;
+      const label = date.toLocaleString("en-US", {
+        month: "short",
+        year: "numeric",
+      });
+      const current = totals.get(key) ?? {
+        key,
+        label,
+        income: 0,
+        expense: 0,
+        date,
+      };
       const amount = Number(entry.amount ?? 0);
       if (entry.type === "income") current.income += amount;
       else current.expense += amount;
@@ -1455,12 +1979,18 @@ function AdminDashboard({ user, role }) {
       const now = new Date();
       entries = [
         {
-          key: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
-          label: now.toLocaleString("en-US", { month: "short", year: "numeric" }),
+          key: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+            2,
+            "0"
+          )}`,
+          label: now.toLocaleString("en-US", {
+            month: "short",
+            year: "numeric",
+          }),
           income: 0,
           expense: 0,
-          date: now
-        }
+          date: now,
+        },
       ];
     }
     const recent = entries.slice(-6);
@@ -1470,36 +2000,48 @@ function AdminDashboard({ user, role }) {
     );
     return recent.map((entry) => ({
       ...entry,
-      incomePercent: maxAmount === 0 ? 0 : Math.round((entry.income / maxAmount) * 100),
-      expensePercent: maxAmount === 0 ? 0 : Math.round((entry.expense / maxAmount) * 100)
+      incomePercent:
+        maxAmount === 0 ? 0 : Math.round((entry.income / maxAmount) * 100),
+      expensePercent:
+        maxAmount === 0 ? 0 : Math.round((entry.expense / maxAmount) * 100),
     }));
-  }, [financeEntries]);
+  }, [combinedFinanceEntries]);
 
   const financeActivity = useMemo(() => {
-    const sorted = [...financeEntries].sort((a, b) => {
+    const sorted = [...combinedFinanceEntries].sort((a, b) => {
       const dateA = resolveFinanceEntryDate(a)?.getTime() ?? 0;
       const dateB = resolveFinanceEntryDate(b)?.getTime() ?? 0;
       return dateB - dateA;
     });
     const recent = sorted.slice(0, 4);
-    const receipts = financeEntries.filter((entry) => entry.attachmentUrl).length;
-    const expenseEntries = financeEntries.filter((entry) => entry.type === "expense");
+    const receipts = combinedFinanceEntries.filter(
+      (entry) => entry.attachmentUrl
+    ).length;
+    const expenseEntries = combinedFinanceEntries.filter(
+      (entry) => entry.type === "expense"
+    );
     const averageExpense =
       expenseEntries.length === 0
         ? 0
-        : expenseEntries.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0) /
-          expenseEntries.length;
+        : expenseEntries.reduce(
+            (sum, entry) => sum + Number(entry.amount ?? 0),
+            0
+          ) / expenseEntries.length;
     return {
-      totalEntries: financeEntries.length,
+      totalEntries: combinedFinanceEntries.length,
       receipts,
       averageExpense,
-      recent
+      recent,
     };
-  }, [financeEntries]);
+  }, [combinedFinanceEntries]);
 
   const handlePaidToggle = async (collectionName, order) => {
     try {
-      await updateDoc(doc(db, collectionName, order.id), { paid: !order.paid });
+      const nextPaid = !order.paid;
+      await updateDoc(doc(db, collectionName, order.id), {
+        paid: nextPaid,
+        paidAt: nextPaid ? serverTimestamp() : null,
+      });
     } catch (err) {
       console.error("paid toggle error", err);
     }
@@ -1535,9 +2077,11 @@ function AdminDashboard({ user, role }) {
       await addDoc(collection(db, "eggTypes"), {
         label: eggDraft.label.trim(),
         price: Number(eggDraft.price),
-        specialPrice: eggDraft.specialPrice ? Number(eggDraft.specialPrice) : null,
+        specialPrice: eggDraft.specialPrice
+          ? Number(eggDraft.specialPrice)
+          : null,
         order: eggTypes.length + 1,
-        available: true
+        available: true,
       });
       setEggDraft({ label: "", price: "", specialPrice: "" });
       setEggMessage("Egg type added.");
@@ -1552,9 +2096,13 @@ function AdminDashboard({ user, role }) {
     setEggMessage("");
     const nextAvailable = item.available === false;
     try {
-      await updateDoc(doc(db, "eggTypes", item.id), { available: nextAvailable });
+      await updateDoc(doc(db, "eggTypes", item.id), {
+        available: nextAvailable,
+      });
       setEggMessage(
-        nextAvailable ? "Egg type marked available." : "Egg type marked unavailable."
+        nextAvailable
+          ? "Egg type marked available."
+          : "Egg type marked unavailable."
       );
     } catch (err) {
       console.error("toggle egg availability error", err);
@@ -1571,7 +2119,7 @@ function AdminDashboard({ user, role }) {
       await updateDoc(doc(db, "eggTypes", id), {
         label: update.label,
         price: Number(update.price),
-        specialPrice: update.specialPrice ? Number(update.specialPrice) : null
+        specialPrice: update.specialPrice ? Number(update.specialPrice) : null,
       });
       setEggMessage("Egg type saved.");
     } catch (err) {
@@ -1589,7 +2137,13 @@ function AdminDashboard({ user, role }) {
     }
   };
 
-  const handleAddDeliveryOption = async (collectionName, draft, reset, setMessage, setError) => {
+  const handleAddDeliveryOption = async (
+    collectionName,
+    draft,
+    reset,
+    setMessage,
+    setError
+  ) => {
     setError("");
     setMessage("");
     if (!draft.label.trim() || draft.cost === "") {
@@ -1600,7 +2154,7 @@ function AdminDashboard({ user, role }) {
       await addDoc(collection(db, collectionName), {
         label: draft.label.trim(),
         cost: Number(draft.cost),
-        order: Date.now()
+        order: Date.now(),
       });
       reset({ label: "", cost: "" });
       setMessage("Delivery option added.");
@@ -1610,7 +2164,13 @@ function AdminDashboard({ user, role }) {
     }
   };
 
-  const handleSaveDeliveryOption = async (collectionName, id, edits, setMessage, setError) => {
+  const handleSaveDeliveryOption = async (
+    collectionName,
+    id,
+    edits,
+    setMessage,
+    setError
+  ) => {
     setError("");
     setMessage("");
     const update = edits[id];
@@ -1618,7 +2178,7 @@ function AdminDashboard({ user, role }) {
     try {
       await updateDoc(doc(db, collectionName, id), {
         label: update.label,
-        cost: Number(update.cost)
+        cost: Number(update.cost),
       });
       setMessage("Delivery option saved.");
     } catch (err) {
@@ -1646,7 +2206,7 @@ function AdminDashboard({ user, role }) {
     try {
       await addDoc(collection(db, "livestockCategories"), {
         name: categoryDraft.name.trim(),
-        description: categoryDraft.description.trim()
+        description: categoryDraft.description.trim(),
       });
       setCategoryDraft({ name: "", description: "" });
       setCategoryMessage("Category added.");
@@ -1660,7 +2220,7 @@ function AdminDashboard({ user, role }) {
     try {
       await updateDoc(doc(db, "livestockCategories", category.id), {
         name: category.name,
-        description: category.description ?? ""
+        description: category.description ?? "",
       });
       setCategoryMessage("Category updated.");
     } catch (err) {
@@ -1685,17 +2245,26 @@ function AdminDashboard({ user, role }) {
       return;
     }
     try {
-      const category = livestockCategories.find((cat) => cat.id === livestockDraft.categoryId);
+      const category = livestockCategories.find(
+        (cat) => cat.id === livestockDraft.categoryId
+      );
       await addDoc(collection(db, "livestockTypes"), {
         label: livestockDraft.label.trim(),
         price: Number(livestockDraft.price),
-        specialPrice: livestockDraft.specialPrice ? Number(livestockDraft.specialPrice) : null,
+        specialPrice: livestockDraft.specialPrice
+          ? Number(livestockDraft.specialPrice)
+          : null,
         order: Date.now(),
         categoryId: livestockDraft.categoryId || "",
         categoryName: category?.name ?? "",
-        available: true
+        available: true,
       });
-      setLivestockDraft({ label: "", price: "", specialPrice: "", categoryId: "" });
+      setLivestockDraft({
+        label: "",
+        price: "",
+        specialPrice: "",
+        categoryId: "",
+      });
       setLivestockMessage("Livestock item added.");
     } catch (err) {
       console.error("add livestock item error", err);
@@ -1708,7 +2277,9 @@ function AdminDashboard({ user, role }) {
     setLivestockMessage("");
     const nextAvailable = item.available === false;
     try {
-      await updateDoc(doc(db, "livestockTypes", item.id), { available: nextAvailable });
+      await updateDoc(doc(db, "livestockTypes", item.id), {
+        available: nextAvailable,
+      });
       setLivestockMessage(
         nextAvailable
           ? "Livestock item marked available."
@@ -1730,7 +2301,8 @@ function AdminDashboard({ user, role }) {
         specialPrice: update.specialPrice ? Number(update.specialPrice) : null,
         categoryId: update.categoryId ?? "",
         categoryName:
-          livestockCategories.find((cat) => cat.id === update.categoryId)?.name ?? ""
+          livestockCategories.find((cat) => cat.id === update.categoryId)
+            ?.name ?? "",
       });
       setLivestockMessage("Livestock item saved.");
     } catch (err) {
@@ -1758,7 +2330,10 @@ function AdminDashboard({ user, role }) {
 
   const startVoiceNoteRecording = async () => {
     setVoiceNoteError("");
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
       setVoiceNoteError("Recording is not supported in this browser.");
       return;
     }
@@ -1782,7 +2357,10 @@ function AdminDashboard({ user, role }) {
       }, 1000);
 
       const mimeType = getVoiceNoteMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      );
       mediaRecorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data?.size) {
@@ -1799,7 +2377,7 @@ function AdminDashboard({ user, role }) {
           Math.floor((Date.now() - recordedAt) / 1000)
         );
         const blob = new Blob(recordingChunksRef.current, {
-          type: recorder.mimeType || mimeType || "audio/webm"
+          type: recorder.mimeType || mimeType || "audio/webm",
         });
         if (blob.size > 0) {
           const previewUrl = URL.createObjectURL(blob);
@@ -1808,7 +2386,7 @@ function AdminDashboard({ user, role }) {
             previewUrl,
             mimeType: blob.type,
             size: blob.size,
-            duration: durationSeconds
+            duration: durationSeconds,
           });
         } else {
           setVoiceNoteError("Recording was empty. Please try again.");
@@ -1856,7 +2434,8 @@ function AdminDashboard({ user, role }) {
       const nextQuantity = resolveStockUpdateQuantity(draft, currentQuantity);
       const currentNotes = item.notes ?? "";
       const nextNotes = draft.notes ?? currentNotes;
-      if (nextQuantity === currentQuantity && nextNotes === currentNotes) return acc;
+      if (nextQuantity === currentQuantity && nextNotes === currentNotes)
+        return acc;
       acc.push({ item, quantity: nextQuantity, notes: nextNotes });
       return acc;
     }, []);
@@ -1865,35 +2444,46 @@ function AdminDashboard({ user, role }) {
 
     setStockUpdateSubmitting(true);
     try {
-      let voiceNoteMeta = {};
+      const batchMeta = {
+        batchId: createBatchId(),
+        batchCreatedAt: new Date(),
+      };
+      let voiceNoteMeta = { ...batchMeta };
       if (voiceNote?.blob) {
         const extension = voiceNote.mimeType?.includes("ogg")
           ? "ogg"
           : voiceNote.mimeType?.includes("mp4")
-            ? "mp4"
-            : "webm";
+          ? "mp4"
+          : "webm";
         const fileName = `voice_note_${Date.now()}.${extension}`;
         const fileRef = storageRef(
           storage,
           `stock_updates/${user.uid ?? "unknown"}/${fileName}`
         );
         await uploadBytes(fileRef, voiceNote.blob, {
-          contentType: voiceNote.mimeType ?? voiceNote.blob.type ?? "audio/webm"
+          contentType:
+            voiceNote.mimeType ?? voiceNote.blob.type ?? "audio/webm",
         });
         const url = await getDownloadURL(fileRef);
         voiceNoteMeta = {
+          ...batchMeta,
           voiceNoteUrl: url,
           voiceNoteName: fileName,
           voiceNoteType: voiceNote.mimeType ?? voiceNote.blob.type ?? "",
           voiceNoteSize: voiceNote.blob.size,
           voiceNoteDuration: voiceNote.duration ?? null,
-          voiceNotePath: fileRef.fullPath
+          voiceNotePath: fileRef.fullPath,
         };
       }
 
       await Promise.all(
         updates.map(({ item, quantity, notes }) =>
-          handleUpdateStockItem(item, { quantity, notes }, "stockUpdateLogs", voiceNoteMeta)
+          handleUpdateStockItem(
+            item,
+            { quantity, notes },
+            "stockUpdateLogs",
+            voiceNoteMeta
+          )
         )
       );
       setStockUpdateDrafts({});
@@ -1918,7 +2508,7 @@ function AdminDashboard({ user, role }) {
       await updateDoc(doc(db, "stockItems", item.id), {
         ...updates,
         updatedAt: serverTimestamp(),
-        updatedBy: user.email ?? ""
+        updatedBy: user.email ?? "",
       });
 
       await addDoc(collection(db, logType), {
@@ -1931,7 +2521,7 @@ function AdminDashboard({ user, role }) {
         notes: updates.notes ?? "",
         userEmail: user.email ?? "",
         createdAt: serverTimestamp(),
-        ...logMeta
+        ...logMeta,
       });
     } catch (err) {
       console.error("stock update error", err);
@@ -1947,7 +2537,7 @@ function AdminDashboard({ user, role }) {
     }
     try {
       await addDoc(collection(db, "stockCategories"), {
-        name: stockCategoryDraft.name.trim()
+        name: stockCategoryDraft.name.trim(),
       });
       setStockCategoryDraft({ name: "" });
       setStockCategoryMessage("Category added.");
@@ -1958,14 +2548,23 @@ function AdminDashboard({ user, role }) {
   };
 
   const handleDeleteStockCategory = async (category) => {
-    if (!window.confirm(`Delete category ${category.name}? This also removes items.`)) return;
+    if (
+      !window.confirm(
+        `Delete category ${category.name}? This also removes items.`
+      )
+    )
+      return;
     try {
       const callable = httpsCallable(functions, "deleteCategoryWithItems");
       await callable({ categoryId: category.id });
     } catch (err) {
       console.warn("deleteCategoryWithItems failed, falling back", err);
-      const itemsToDelete = stockItems.filter((item) => item.categoryId === category.id);
-      await Promise.all(itemsToDelete.map((item) => deleteDoc(doc(db, "stockItems", item.id))));
+      const itemsToDelete = stockItems.filter(
+        (item) => item.categoryId === category.id
+      );
+      await Promise.all(
+        itemsToDelete.map((item) => deleteDoc(doc(db, "stockItems", item.id)))
+      );
       await deleteDoc(doc(db, "stockCategories", category.id));
     }
   };
@@ -1977,7 +2576,9 @@ function AdminDashboard({ user, role }) {
       return;
     }
     try {
-      const category = stockCategories.find((cat) => cat.id === stockItemDraft.categoryId);
+      const category = stockCategories.find(
+        (cat) => cat.id === stockItemDraft.categoryId
+      );
       await addDoc(collection(db, "stockItems"), {
         name: stockItemDraft.name.trim(),
         categoryId: stockItemDraft.categoryId || "",
@@ -1987,7 +2588,7 @@ function AdminDashboard({ user, role }) {
         threshold: Number(stockItemDraft.threshold || 0),
         notes: stockItemDraft.notes.trim(),
         updatedAt: serverTimestamp(),
-        updatedBy: user.email ?? ""
+        updatedBy: user.email ?? "",
       });
       setStockItemDraft({
         name: "",
@@ -1995,7 +2596,7 @@ function AdminDashboard({ user, role }) {
         subCategory: "",
         quantity: "",
         threshold: "5",
-        notes: ""
+        notes: "",
       });
     } catch (err) {
       console.error("add stock item error", err);
@@ -2019,7 +2620,7 @@ function AdminDashboard({ user, role }) {
       const result = await callable({
         email: userDraft.email.trim(),
         role: userDraft.role,
-        password: userDraft.password.trim() || undefined
+        password: userDraft.password.trim() || undefined,
       });
       const tempPassword = result?.data?.temporaryPassword;
       setUserMessage(
@@ -2125,7 +2726,7 @@ function AdminDashboard({ user, role }) {
         date: financeDraft.date,
         attachmentUrl,
         attachmentName,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       });
 
       setFinanceDraft({
@@ -2133,7 +2734,7 @@ function AdminDashboard({ user, role }) {
         amount: "",
         description: "",
         date: new Date().toISOString().split("T")[0],
-        file: null
+        file: null,
       });
       setFinanceMessage("Entry added.");
       setShowFinanceForm(false);
@@ -2188,32 +2789,42 @@ function AdminDashboard({ user, role }) {
     window.open(shareUrl, "_blank", "noopener,noreferrer");
   };
 
-  const activeOrders = resolvedTab === "livestock_orders" ? filteredLivestockOrders : filteredEggOrders;
+  const activeOrders =
+    resolvedTab === "livestock_orders"
+      ? filteredLivestockOrders
+      : filteredEggOrders;
   const activeOrderTitle =
-    resolvedTab === "livestock_orders" ? "Live Livestock Orders" : "Live Egg Orders";
+    resolvedTab === "livestock_orders"
+      ? "Live Livestock Orders"
+      : "Live Egg Orders";
   const activeOrderCollection =
     resolvedTab === "livestock_orders" ? "livestockOrders" : "eggOrders";
-  const activeItemLabel = resolvedTab === "livestock_orders" ? "Livestock" : "Eggs";
+  const activeItemLabel =
+    resolvedTab === "livestock_orders" ? "Livestock" : "Eggs";
   const modalDeliveryOptions =
     selectedOrderCollection === "livestockOrders"
       ? resolvedLivestockDeliveryOptions
       : resolvedEggDeliveryOptions;
   const modalItemOptions =
-    selectedOrderCollection === "livestockOrders" ? livestockTypes : resolvedEggTypes;
-  const isOrdersActive = resolvedTab === "orders" || resolvedTab === "livestock_orders";
-  const isTypesActive = resolvedTab === "eggs" || resolvedTab === "livestock_types";
+    selectedOrderCollection === "livestockOrders"
+      ? livestockTypes
+      : resolvedEggTypes;
+  const isOrdersActive =
+    resolvedTab === "orders" || resolvedTab === "livestock_orders";
+  const isTypesActive =
+    resolvedTab === "eggs" || resolvedTab === "livestock_types";
   const canSeeTypes = isAdmin;
   const toggleMenu = (menuId) =>
     setOpenMenu((prev) => (prev === menuId ? null : menuId));
 
   const orderTabs = [
     { id: "orders", label: "Egg orders" },
-    { id: "livestock_orders", label: "Livestock orders" }
+    { id: "livestock_orders", label: "Livestock orders" },
   ];
 
   const typeTabs = [
     { id: "eggs", label: "Egg types", adminOnly: true },
-    { id: "livestock_types", label: "Livestock types", adminOnly: true }
+    { id: "livestock_types", label: "Livestock types", adminOnly: true },
   ];
 
   const tabs = [
@@ -2224,7 +2835,7 @@ function AdminDashboard({ user, role }) {
     { id: "stock_updates", label: "Stock updates" },
     { id: "users", label: "Users", adminOnly: true },
     { id: "finance", label: "Finance", adminOnly: true },
-    { id: "reports", label: "Reports", adminOnly: true }
+    { id: "reports", label: "Reports", adminOnly: true },
   ];
   const visibleTabs = isWorker
     ? tabs.filter((tab) => tab.id === "stock_updates")
@@ -2237,7 +2848,9 @@ function AdminDashboard({ user, role }) {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
             Admin dashboard
           </p>
-          <h1 className="text-2xl font-bold text-brandGreen">Operations Center</h1>
+          <h1 className="text-2xl font-bold text-brandGreen">
+            Operations Center
+          </h1>
           <p className={mutedText}>Signed in as {user.email}</p>
         </div>
         <button
@@ -2251,7 +2864,10 @@ function AdminDashboard({ user, role }) {
 
       <div className="flex flex-wrap gap-2">
         {!isWorker ? (
-          <div className="relative" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="relative"
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               type="button"
               onClick={() => toggleMenu("orders")}
@@ -2290,7 +2906,10 @@ function AdminDashboard({ user, role }) {
         ) : null}
 
         {canSeeTypes && !isWorker ? (
-          <div className="relative" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="relative"
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               type="button"
               onClick={() => toggleMenu("types")}
@@ -2353,12 +2972,17 @@ function AdminDashboard({ user, role }) {
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
                 Admin dashboard
               </p>
-              <h2 className="text-2xl font-bold text-brandGreen">{activeOrderTitle}</h2>
-              <p className={mutedText}>Real-time feed and sorted by most recent.</p>
+              <h2 className="text-2xl font-bold text-brandGreen">
+                {activeOrderTitle}
+              </h2>
+              <p className={mutedText}>
+                Real-time feed and sorted by most recent.
+              </p>
             </div>
             <div className="flex flex-col gap-2 text-sm text-brandGreen md:items-end">
               <div className="rounded-full bg-white/70 px-4 py-2 shadow-inner">
-                Total orders: <span className="font-semibold">{activeOrders.length}</span>
+                Total orders:{" "}
+                <span className="font-semibold">{activeOrders.length}</span>
               </div>
               {resolvedTab === "orders" ? (
                 <div className="rounded-full bg-white/70 px-4 py-2 shadow-inner">
@@ -2435,7 +3059,9 @@ function AdminDashboard({ user, role }) {
                   onChange={(event) => setSortKey(event.target.value)}
                   className="w-full rounded-lg border border-brandGreen/30 bg-brandCream px-3 py-2 text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30 md:w-44"
                 >
-                  <option value="orderNumberDesc">Order # (latest first)</option>
+                  <option value="orderNumberDesc">
+                    Order # (latest first)
+                  </option>
                   <option value="orderNumberAsc">Order # (oldest first)</option>
                   <option value="createdDesc">Created newest</option>
                   <option value="createdAsc">Oldest first</option>
@@ -2478,7 +3104,9 @@ function AdminDashboard({ user, role }) {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <p className="text-xs text-brandGreen/70">{formatDate(order.createdAtDate)}</p>
+                      <p className="text-xs text-brandGreen/70">
+                        {formatDate(order.createdAtDate)}
+                      </p>
                       <p className="text-xs font-mono text-brandGreen">
                         {order.orderNumber || "-"}
                       </p>
@@ -2486,13 +3114,16 @@ function AdminDashboard({ user, role }) {
                         {order.name} {order.surname}
                       </p>
                       <p className="text-xs text-brandGreen/70">
-                        {[order.email, order.cellphone].filter(Boolean).join(" · ")}
+                        {[order.email, order.cellphone]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <span
                         className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${
-                          STATUS_STYLES[order.orderStatus] || "bg-gray-100 text-gray-800"
+                          STATUS_STYLES[order.orderStatus] ||
+                          "bg-gray-100 text-gray-800"
                         }`}
                       >
                         {order.orderStatus}
@@ -2516,7 +3147,9 @@ function AdminDashboard({ user, role }) {
                       Delivery: {order.deliveryOption ?? "-"}
                     </p>
                     <p>Send date: {order.sendDate ?? "-"}</p>
-                    <p className="font-semibold">Total: {formatCurrency(order.totalCost)}</p>
+                    <p className="font-semibold">
+                      Total: {formatCurrency(order.totalCost)}
+                    </p>
                     <p>
                       {activeItemLabel}: {order.eggSummary || "-"}
                     </p>
@@ -2545,21 +3178,29 @@ function AdminDashboard({ user, role }) {
                     <th className="px-4 py-3 font-semibold">Send date</th>
                     <th className="px-4 py-3 font-semibold">Total</th>
                     <th className="px-4 py-3 font-semibold">Paid</th>
-                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                    <th className="px-4 py-3 font-semibold text-right">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeOrders.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="px-4 py-6 text-center text-brandGreen/70">
+                      <td
+                        colSpan={11}
+                        className="px-4 py-6 text-center text-brandGreen/70"
+                      >
                         No orders match your filters.
                       </td>
                     </tr>
                   )}
                   {activeOrders.map((order, index) => {
-                    const rowClass = index % 2 === 0 ? "bg-white" : "bg-brandBeige/60";
+                    const rowClass =
+                      index % 2 === 0 ? "bg-white" : "bg-brandBeige/60";
                     const internalNote =
-                      typeof order.internalNote === "string" ? order.internalNote.trim() : "";
+                      typeof order.internalNote === "string"
+                        ? order.internalNote.trim()
+                        : "";
                     const noteTitle = internalNote
                       ? `Internal note: ${internalNote.replace(/\s+/g, " ")}`
                       : "";
@@ -2601,17 +3242,22 @@ function AdminDashboard({ user, role }) {
                             {order.cellphone}
                           </a>
                         </td>
-                        <td className="px-4 py-3 align-top">{order.deliveryOption ?? "-"}</td>
+                        <td className="px-4 py-3 align-top">
+                          {order.deliveryOption ?? "-"}
+                        </td>
                         <td className="px-4 py-3 align-top">
                           <span
                             className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${
-                              STATUS_STYLES[order.orderStatus] || "bg-gray-100 text-gray-800"
+                              STATUS_STYLES[order.orderStatus] ||
+                              "bg-gray-100 text-gray-800"
                             }`}
                           >
                             {order.orderStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-3 align-top">{order.sendDate ?? "-"}</td>
+                        <td className="px-4 py-3 align-top">
+                          {order.sendDate ?? "-"}
+                        </td>
                         <td className="px-4 py-3 align-top font-semibold">
                           {formatCurrency(order.totalCost)}
                         </td>
@@ -2636,7 +3282,9 @@ function AdminDashboard({ user, role }) {
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   setSelectedOrder(order);
-                                  setSelectedOrderCollection(activeOrderCollection);
+                                  setSelectedOrderCollection(
+                                    activeOrderCollection
+                                  );
                                 }}
                                 className="flex h-8 w-8 items-center justify-center rounded-full border border-brandGreen/30 bg-white text-brandGreen shadow-sm transition hover:bg-brandBeige"
                               >
@@ -2648,7 +3296,9 @@ function AdminDashboard({ user, role }) {
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setSelectedOrder(order);
-                                setSelectedOrderCollection(activeOrderCollection);
+                                setSelectedOrderCollection(
+                                  activeOrderCollection
+                                );
                               }}
                               className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brandGreen text-white shadow-sm transition hover:shadow-md"
                               aria-label="View order"
@@ -2674,8 +3324,12 @@ function AdminDashboard({ user, role }) {
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
                 Egg types
               </p>
-              <h2 className="text-xl font-bold text-brandGreen">Manage breeds & prices</h2>
-              <p className={mutedText}>Add new breeds or update pricing/specials.</p>
+              <h2 className="text-xl font-bold text-brandGreen">
+                Manage breeds & prices
+              </h2>
+              <p className={mutedText}>
+                Add new breeds or update pricing/specials.
+              </p>
             </div>
             {eggMessage ? (
               <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
@@ -2694,14 +3348,18 @@ function AdminDashboard({ user, role }) {
             <input
               type="text"
               value={eggDraft.label}
-              onChange={(event) => setEggDraft((prev) => ({ ...prev, label: event.target.value }))}
+              onChange={(event) =>
+                setEggDraft((prev) => ({ ...prev, label: event.target.value }))
+              }
               placeholder="e.g. New Breed"
               className={inputClass}
             />
             <input
               type="number"
               value={eggDraft.price}
-              onChange={(event) => setEggDraft((prev) => ({ ...prev, price: event.target.value }))}
+              onChange={(event) =>
+                setEggDraft((prev) => ({ ...prev, price: event.target.value }))
+              }
               placeholder="Price"
               className={inputClass}
             />
@@ -2709,7 +3367,10 @@ function AdminDashboard({ user, role }) {
               type="number"
               value={eggDraft.specialPrice}
               onChange={(event) =>
-                setEggDraft((prev) => ({ ...prev, specialPrice: event.target.value }))
+                setEggDraft((prev) => ({
+                  ...prev,
+                  specialPrice: event.target.value,
+                }))
               }
               placeholder="Special price (optional)"
               className={inputClass}
@@ -2735,7 +3396,7 @@ function AdminDashboard({ user, role }) {
                 const edit = eggEdits[item.id] ?? {
                   label: item.label ?? "",
                   price: item.price ?? 0,
-                  specialPrice: item.specialPrice ?? ""
+                  specialPrice: item.specialPrice ?? "",
                 };
                 const isAvailable = item.available !== false;
                 return (
@@ -2753,7 +3414,7 @@ function AdminDashboard({ user, role }) {
                         onChange={(event) =>
                           setEggEdits((prev) => ({
                             ...prev,
-                            [item.id]: { ...edit, label: event.target.value }
+                            [item.id]: { ...edit, label: event.target.value },
                           }))
                         }
                       />
@@ -2764,7 +3425,7 @@ function AdminDashboard({ user, role }) {
                         onChange={(event) =>
                           setEggEdits((prev) => ({
                             ...prev,
-                            [item.id]: { ...edit, price: event.target.value }
+                            [item.id]: { ...edit, price: event.target.value },
                           }))
                         }
                       />
@@ -2775,7 +3436,10 @@ function AdminDashboard({ user, role }) {
                         onChange={(event) =>
                           setEggEdits((prev) => ({
                             ...prev,
-                            [item.id]: { ...edit, specialPrice: event.target.value }
+                            [item.id]: {
+                              ...edit,
+                              specialPrice: event.target.value,
+                            },
                           }))
                         }
                         placeholder="Special price"
@@ -2829,7 +3493,9 @@ function AdminDashboard({ user, role }) {
                                 }}
                                 className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-brandGreen transition hover:bg-brandBeige"
                               >
-                                {isAvailable ? "Mark unavailable" : "Mark available"}
+                                {isAvailable
+                                  ? "Mark unavailable"
+                                  : "Mark available"}
                               </button>
                               <button
                                 type="button"
@@ -2858,7 +3524,11 @@ function AdminDashboard({ user, role }) {
         <DeliveryOptionsPanel
           title="Delivery methods"
           description="Manage delivery options for egg orders."
-          options={deliveryOptions.length > 0 ? deliveryOptions : DEFAULT_DELIVERY_OPTIONS}
+          options={
+            deliveryOptions.length > 0
+              ? deliveryOptions
+              : DEFAULT_DELIVERY_OPTIONS
+          }
           draft={deliveryDraft}
           edits={deliveryEdits}
           setDraft={setDeliveryDraft}
@@ -2920,7 +3590,9 @@ function AdminDashboard({ user, role }) {
               setLivestockDeliveryError
             )
           }
-          onDelete={(id) => handleDeleteDeliveryOption("livestockDeliveryOptions", id)}
+          onDelete={(id) =>
+            handleDeleteDeliveryOption("livestockDeliveryOptions", id)
+          }
         />
       )}
 
@@ -2931,9 +3603,12 @@ function AdminDashboard({ user, role }) {
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
                 Livestock types
               </p>
-              <h2 className="text-xl font-bold text-brandGreen">Categories & items</h2>
+              <h2 className="text-xl font-bold text-brandGreen">
+                Categories & items
+              </h2>
               <p className={mutedText}>
-                Add categories and items under them. These feed the livestock order form.
+                Add categories and items under them. These feed the livestock
+                order form.
               </p>
             </div>
             {categoryMessage ? (
@@ -2951,13 +3626,18 @@ function AdminDashboard({ user, role }) {
 
           <div className="mt-4 grid gap-3 md:grid-cols-[2fr_3fr]">
             <div className="space-y-3 rounded-xl border border-brandGreen/15 bg-brandBeige/60 p-4">
-              <h3 className="text-sm font-semibold text-brandGreen">Add category</h3>
+              <h3 className="text-sm font-semibold text-brandGreen">
+                Add category
+              </h3>
               <div className="grid gap-2">
                 <input
                   type="text"
                   value={categoryDraft.name}
                   onChange={(event) =>
-                    setCategoryDraft((prev) => ({ ...prev, name: event.target.value }))
+                    setCategoryDraft((prev) => ({
+                      ...prev,
+                      name: event.target.value,
+                    }))
                   }
                   placeholder="e.g. Adult Chickens"
                   className={inputClass}
@@ -2965,7 +3645,10 @@ function AdminDashboard({ user, role }) {
                 <textarea
                   value={categoryDraft.description}
                   onChange={(event) =>
-                    setCategoryDraft((prev) => ({ ...prev, description: event.target.value }))
+                    setCategoryDraft((prev) => ({
+                      ...prev,
+                      description: event.target.value,
+                    }))
                   }
                   placeholder="Description (optional)"
                   className={inputClass}
@@ -2983,7 +3666,10 @@ function AdminDashboard({ user, role }) {
 
               <div className="space-y-2">
                 {livestockCategories.map((category) => (
-                  <div key={category.id} className="space-y-2 rounded-lg border border-brandGreen/15 bg-white px-3 py-2">
+                  <div
+                    key={category.id}
+                    className="space-y-2 rounded-lg border border-brandGreen/15 bg-white px-3 py-2"
+                  >
                     <input
                       type="text"
                       value={category.name}
@@ -3037,13 +3723,18 @@ function AdminDashboard({ user, role }) {
             </div>
 
             <div className="space-y-3 rounded-xl border border-brandGreen/15 bg-brandBeige/60 p-4">
-              <h3 className="text-sm font-semibold text-brandGreen">Add livestock item</h3>
+              <h3 className="text-sm font-semibold text-brandGreen">
+                Add livestock item
+              </h3>
               <div className="grid gap-2 md:grid-cols-2">
                 <input
                   type="text"
                   value={livestockDraft.label}
                   onChange={(event) =>
-                    setLivestockDraft((prev) => ({ ...prev, label: event.target.value }))
+                    setLivestockDraft((prev) => ({
+                      ...prev,
+                      label: event.target.value,
+                    }))
                   }
                   placeholder="e.g. Bantam"
                   className={inputClass}
@@ -3051,7 +3742,10 @@ function AdminDashboard({ user, role }) {
                 <select
                   value={livestockDraft.categoryId}
                   onChange={(event) =>
-                    setLivestockDraft((prev) => ({ ...prev, categoryId: event.target.value }))
+                    setLivestockDraft((prev) => ({
+                      ...prev,
+                      categoryId: event.target.value,
+                    }))
                   }
                   className={inputClass}
                 >
@@ -3066,7 +3760,10 @@ function AdminDashboard({ user, role }) {
                   type="number"
                   value={livestockDraft.price}
                   onChange={(event) =>
-                    setLivestockDraft((prev) => ({ ...prev, price: event.target.value }))
+                    setLivestockDraft((prev) => ({
+                      ...prev,
+                      price: event.target.value,
+                    }))
                   }
                   placeholder="Price"
                   className={inputClass}
@@ -3075,7 +3772,10 @@ function AdminDashboard({ user, role }) {
                   type="number"
                   value={livestockDraft.specialPrice}
                   onChange={(event) =>
-                    setLivestockDraft((prev) => ({ ...prev, specialPrice: event.target.value }))
+                    setLivestockDraft((prev) => ({
+                      ...prev,
+                      specialPrice: event.target.value,
+                    }))
                   }
                   placeholder="Special price (optional)"
                   className={inputClass}
@@ -3094,7 +3794,9 @@ function AdminDashboard({ user, role }) {
           </div>
 
           <div className="mt-4 space-y-3 rounded-xl border border-brandGreen/15 bg-white p-4 shadow-inner">
-            <h3 className="text-sm font-semibold text-brandGreen">Existing items</h3>
+            <h3 className="text-sm font-semibold text-brandGreen">
+              Existing items
+            </h3>
             {livestockTypes.length === 0 ? (
               <p className={mutedText}>No livestock items yet.</p>
             ) : (
@@ -3109,7 +3811,9 @@ function AdminDashboard({ user, role }) {
                       className="space-y-2 rounded-lg border border-brandGreen/15 bg-brandBeige/50 p-3"
                     >
                       <div className="flex items-center justify-between">
-                        <p className="font-semibold text-brandGreen">{category.name}</p>
+                        <p className="font-semibold text-brandGreen">
+                          {category.name}
+                        </p>
                         <span className="text-xs text-brandGreen/60">
                           {items.length} item{items.length === 1 ? "" : "s"}
                         </span>
@@ -3122,7 +3826,7 @@ function AdminDashboard({ user, role }) {
                             label: item.label ?? "",
                             price: item.price ?? 0,
                             specialPrice: item.specialPrice ?? "",
-                            categoryId: item.categoryId ?? ""
+                            categoryId: item.categoryId ?? "",
                           };
                           const isAvailable = item.available !== false;
                           return (
@@ -3139,7 +3843,10 @@ function AdminDashboard({ user, role }) {
                                   onChange={(event) =>
                                     setLivestockEdits((prev) => ({
                                       ...prev,
-                                      [item.id]: { ...edit, label: event.target.value }
+                                      [item.id]: {
+                                        ...edit,
+                                        label: event.target.value,
+                                      },
                                     }))
                                   }
                                   className={inputClass}
@@ -3149,14 +3856,20 @@ function AdminDashboard({ user, role }) {
                                   onChange={(event) =>
                                     setLivestockEdits((prev) => ({
                                       ...prev,
-                                      [item.id]: { ...edit, categoryId: event.target.value }
+                                      [item.id]: {
+                                        ...edit,
+                                        categoryId: event.target.value,
+                                      },
                                     }))
                                   }
                                   className={inputClass}
                                 >
                                   <option value="">Select category</option>
                                   {livestockCategories.map((categoryOption) => (
-                                    <option key={categoryOption.id} value={categoryOption.id}>
+                                    <option
+                                      key={categoryOption.id}
+                                      value={categoryOption.id}
+                                    >
                                       {categoryOption.name}
                                     </option>
                                   ))}
@@ -3167,7 +3880,10 @@ function AdminDashboard({ user, role }) {
                                   onChange={(event) =>
                                     setLivestockEdits((prev) => ({
                                       ...prev,
-                                      [item.id]: { ...edit, price: event.target.value }
+                                      [item.id]: {
+                                        ...edit,
+                                        price: event.target.value,
+                                      },
                                     }))
                                   }
                                   className={inputClass}
@@ -3178,7 +3894,10 @@ function AdminDashboard({ user, role }) {
                                   onChange={(event) =>
                                     setLivestockEdits((prev) => ({
                                       ...prev,
-                                      [item.id]: { ...edit, specialPrice: event.target.value }
+                                      [item.id]: {
+                                        ...edit,
+                                        specialPrice: event.target.value,
+                                      },
                                     }))
                                   }
                                   className={inputClass}
@@ -3206,7 +3925,9 @@ function AdminDashboard({ user, role }) {
                                       toggleMenu(`livestock-type-${item.id}`);
                                     }}
                                     aria-haspopup="menu"
-                                    aria-expanded={openMenu === `livestock-type-${item.id}`}
+                                    aria-expanded={
+                                      openMenu === `livestock-type-${item.id}`
+                                    }
                                     className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brandGreen text-white shadow-sm transition hover:shadow-md"
                                   >
                                     ...
@@ -3214,7 +3935,9 @@ function AdminDashboard({ user, role }) {
                                   {openMenu === `livestock-type-${item.id}` ? (
                                     <div
                                       className="absolute right-0 z-20 mt-2 w-44 rounded-2xl border border-brandGreen/20 bg-white p-2 shadow-xl"
-                                      onClick={(event) => event.stopPropagation()}
+                                      onClick={(event) =>
+                                        event.stopPropagation()
+                                      }
                                     >
                                       <button
                                         type="button"
@@ -3229,12 +3952,16 @@ function AdminDashboard({ user, role }) {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          handleToggleLivestockAvailability(item);
+                                          handleToggleLivestockAvailability(
+                                            item
+                                          );
                                           setOpenMenu(null);
                                         }}
                                         className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-brandGreen transition hover:bg-brandBeige"
                                       >
-                                        {isAvailable ? "Mark unavailable" : "Mark available"}
+                                        {isAvailable
+                                          ? "Mark unavailable"
+                                          : "Mark available"}
                                       </button>
                                       <button
                                         type="button"
@@ -3272,8 +3999,8 @@ function AdminDashboard({ user, role }) {
               </p>
               <h2 className="text-xl font-bold text-brandGreen">Stock items</h2>
               <p className={mutedText}>
-                Track quantities, thresholds, and notes. Admins can add items; workers can update
-                quantities and notes.
+                Track quantities, thresholds, and notes. Admins can add items;
+                workers can update quantities and notes.
               </p>
             </div>
           </div>
@@ -3318,12 +4045,17 @@ function AdminDashboard({ user, role }) {
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="space-y-3 rounded-xl border border-brandGreen/15 bg-brandBeige/60 p-4">
-              <h3 className="text-sm font-semibold text-brandGreen">Add category</h3>
+              <h3 className="text-sm font-semibold text-brandGreen">
+                Add category
+              </h3>
               <input
                 type="text"
                 value={stockCategoryDraft.name}
                 onChange={(event) =>
-                  setStockCategoryDraft((prev) => ({ ...prev, name: event.target.value }))
+                  setStockCategoryDraft((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
                 }
                 placeholder="e.g. Feed"
                 className={inputClass}
@@ -3341,11 +4073,16 @@ function AdminDashboard({ user, role }) {
                 <p className="text-xs text-red-700">{stockCategoryError}</p>
               ) : null}
               {stockCategoryMessage ? (
-                <p className="text-xs text-emerald-700">{stockCategoryMessage}</p>
+                <p className="text-xs text-emerald-700">
+                  {stockCategoryMessage}
+                </p>
               ) : null}
               <div className="space-y-2">
                 {stockCategories.map((category) => (
-                  <div key={category.id} className="flex items-center justify-between rounded-lg bg-white px-3 py-2">
+                  <div
+                    key={category.id}
+                    className="flex items-center justify-between rounded-lg bg-white px-3 py-2"
+                  >
                     <span className="text-sm font-semibold text-brandGreen">
                       {category.name}
                     </span>
@@ -3362,13 +4099,18 @@ function AdminDashboard({ user, role }) {
             </div>
 
             <div className="space-y-3 rounded-xl border border-brandGreen/15 bg-brandBeige/60 p-4">
-              <h3 className="text-sm font-semibold text-brandGreen">Add stock item</h3>
+              <h3 className="text-sm font-semibold text-brandGreen">
+                Add stock item
+              </h3>
               <div className="grid gap-2">
                 <input
                   type="text"
                   value={stockItemDraft.name}
                   onChange={(event) =>
-                    setStockItemDraft((prev) => ({ ...prev, name: event.target.value }))
+                    setStockItemDraft((prev) => ({
+                      ...prev,
+                      name: event.target.value,
+                    }))
                   }
                   placeholder="Item name"
                   className={inputClass}
@@ -3376,7 +4118,10 @@ function AdminDashboard({ user, role }) {
                 <select
                   value={stockItemDraft.categoryId}
                   onChange={(event) =>
-                    setStockItemDraft((prev) => ({ ...prev, categoryId: event.target.value }))
+                    setStockItemDraft((prev) => ({
+                      ...prev,
+                      categoryId: event.target.value,
+                    }))
                   }
                   className={inputClass}
                 >
@@ -3391,7 +4136,10 @@ function AdminDashboard({ user, role }) {
                   type="text"
                   value={stockItemDraft.subCategory}
                   onChange={(event) =>
-                    setStockItemDraft((prev) => ({ ...prev, subCategory: event.target.value }))
+                    setStockItemDraft((prev) => ({
+                      ...prev,
+                      subCategory: event.target.value,
+                    }))
                   }
                   placeholder="Subcategory (optional)"
                   className={inputClass}
@@ -3401,7 +4149,10 @@ function AdminDashboard({ user, role }) {
                     type="number"
                     value={stockItemDraft.quantity}
                     onChange={(event) =>
-                      setStockItemDraft((prev) => ({ ...prev, quantity: event.target.value }))
+                      setStockItemDraft((prev) => ({
+                        ...prev,
+                        quantity: event.target.value,
+                      }))
                     }
                     placeholder="Quantity"
                     className={inputClass}
@@ -3410,7 +4161,10 @@ function AdminDashboard({ user, role }) {
                     type="number"
                     value={stockItemDraft.threshold}
                     onChange={(event) =>
-                      setStockItemDraft((prev) => ({ ...prev, threshold: event.target.value }))
+                      setStockItemDraft((prev) => ({
+                        ...prev,
+                        threshold: event.target.value,
+                      }))
                     }
                     placeholder="Threshold"
                     className={inputClass}
@@ -3419,7 +4173,10 @@ function AdminDashboard({ user, role }) {
                 <textarea
                   value={stockItemDraft.notes}
                   onChange={(event) =>
-                    setStockItemDraft((prev) => ({ ...prev, notes: event.target.value }))
+                    setStockItemDraft((prev) => ({
+                      ...prev,
+                      notes: event.target.value,
+                    }))
                   }
                   placeholder="Notes"
                   className={inputClass}
@@ -3439,7 +4196,10 @@ function AdminDashboard({ user, role }) {
 
           <div className="mt-4 space-y-3">
             {filteredStockItems.map((item) => (
-              <div key={item.id} className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm">
+              <div
+                key={item.id}
+                className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
+              >
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="font-semibold text-brandGreen">{item.name}</p>
@@ -3457,7 +4217,10 @@ function AdminDashboard({ user, role }) {
                         setStockItems((prev) =>
                           prev.map((current) =>
                             current.id === item.id
-                              ? { ...current, quantity: Number(event.target.value) }
+                              ? {
+                                  ...current,
+                                  quantity: Number(event.target.value),
+                                }
                               : current
                           )
                         )
@@ -3483,7 +4246,7 @@ function AdminDashboard({ user, role }) {
                       onClick={() =>
                         handleUpdateStockItem(item, {
                           quantity: item.quantity ?? 0,
-                          notes: item.notes ?? ""
+                          notes: item.notes ?? "",
                         })
                       }
                       className="rounded-full bg-brandGreen px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:shadow-md"
@@ -3512,26 +4275,28 @@ function AdminDashboard({ user, role }) {
               </p>
               <h2 className="text-xl font-bold text-brandGreen">Stock logs</h2>
               <p className={mutedText}>
-                Track who changed inventory, when it happened, and any notes. Search scans
-                the loaded logs; load all to search further back.
+                Track who changed inventory, when it happened, and any notes.
+                Search scans the loaded logs; load all to search further back.
               </p>
             </div>
             <div className="flex flex-col gap-2 md:items-end">
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAllStockLogs(true)}
-                  disabled={showAllStockLogs || stockLogs.length <= STOCK_LOG_LIMIT}
+                  onClick={() =>
+                    setShowAllStockLogs((prev) => !prev)
+                  }
+                  disabled={allStockLogs.length <= STOCK_LOG_LIMIT}
                   className="rounded-full border border-brandGreen/30 px-4 py-2 text-xs font-semibold text-brandGreen transition hover:bg-brandBeige disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Load all
+                  {showAllStockLogs ? "Show newest" : "Load all"}
                 </button>
                 <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-brandGreen shadow-inner">
                   {visibleStockLogs.length} logs loaded
                 </span>
               </div>
               <p className="text-xs text-brandGreen/60">
-                {showAllStockLogs || stockLogs.length <= STOCK_LOG_LIMIT
+                {showAllStockLogs || allStockLogs.length <= STOCK_LOG_LIMIT
                   ? "Showing all loaded entries."
                   : `Showing the newest ${STOCK_LOG_LIMIT} entries.`}
               </p>
@@ -3558,7 +4323,7 @@ function AdminDashboard({ user, role }) {
             </div>
           </div>
 
-          {stockLogs.length === 0 ? (
+          {allStockLogs.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-brandGreen/30 bg-white/70 px-4 py-6 text-sm text-brandGreen/70">
               No stock logs yet.
             </div>
@@ -3581,7 +4346,8 @@ function AdminDashboard({ user, role }) {
                       const entries = getLogEntries(log);
                       const title = getLogTitle(log, entries);
                       const user = log.userEmail ?? log.updatedBy ?? "-";
-                      const rowClass = index % 2 === 0 ? "bg-white" : "bg-brandBeige/60";
+                      const rowClass =
+                        index % 2 === 0 ? "bg-white" : "bg-brandBeige/60";
                       return (
                         <tr key={log.id} className={rowClass}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
@@ -3590,7 +4356,9 @@ function AdminDashboard({ user, role }) {
                           <td className="px-3 py-2 align-top">
                             <div className="font-semibold">{title}</div>
                             {entries.length === 1 && log.itemId ? (
-                              <p className="text-xs text-brandGreen/60">ID: {log.itemId}</p>
+                              <p className="text-xs text-brandGreen/60">
+                                ID: {log.itemId}
+                              </p>
                             ) : null}
                           </td>
                           <td className="px-3 py-2 align-top">
@@ -3602,7 +4370,9 @@ function AdminDashboard({ user, role }) {
                                     entry.change
                                   )}`}
                                 >
-                                  <span className="text-brandGreen">{entry.name}</span>
+                                  <span className="text-brandGreen">
+                                    {entry.name}
+                                  </span>
                                   <span>{formatChangeValue(entry.change)}</span>
                                 </div>
                               ))}
@@ -3615,7 +4385,9 @@ function AdminDashboard({ user, role }) {
                                   key={`${log.id}-qty-${entryIndex}`}
                                   className="flex items-center justify-between gap-2"
                                 >
-                                  <span className="text-brandGreen/70">{entry.name}</span>
+                                  <span className="text-brandGreen/70">
+                                    {entry.name}
+                                  </span>
                                   <span className="font-semibold">
                                     {entry.fromQty} → {entry.toQty}
                                   </span>
@@ -3636,18 +4408,22 @@ function AdminDashboard({ user, role }) {
                                       {entry.name}
                                     </span>
                                     <span className="text-brandGreen/80">
-                                      {formatChangeValue(entry.change)} ({entry.fromQty} →{" "}
-                                      {entry.toQty})
+                                      {formatChangeValue(entry.change)} (
+                                      {entry.fromQty} → {entry.toQty})
                                     </span>
                                   </div>
                                 ))}
                               </div>
                             ) : log.notes ? (
                               <div className="space-y-1">
-                                <p className="m-0 text-sm text-brandGreen/80">{log.notes}</p>
+                                <p className="m-0 text-sm text-brandGreen/80">
+                                  {log.notes}
+                                </p>
                               </div>
                             ) : (
-                              <span className="text-xs text-brandGreen/60">-</span>
+                              <span className="text-xs text-brandGreen/60">
+                                -
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -3668,7 +4444,9 @@ function AdminDashboard({ user, role }) {
                       className="space-y-1 rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
                     >
                       <div className="flex items-center justify-between">
-                        <div className="font-semibold text-brandGreen">{title}</div>
+                        <div className="font-semibold text-brandGreen">
+                          {title}
+                        </div>
                         <span className="text-xs text-brandGreen/60">
                           {formatTimestamp(log.createdAt)}
                         </span>
@@ -3679,10 +4457,12 @@ function AdminDashboard({ user, role }) {
                             key={`${log.id}-mobile-${entryIndex}`}
                             className="flex items-center justify-between gap-2"
                           >
-                            <span className="font-semibold text-brandGreen">{entry.name}</span>
+                            <span className="font-semibold text-brandGreen">
+                              {entry.name}
+                            </span>
                             <span className={getChangeColor(entry.change)}>
-                              {formatChangeValue(entry.change)} ({entry.fromQty} →{" "}
-                              {entry.toQty})
+                              {formatChangeValue(entry.change)} ({entry.fromQty}{" "}
+                              → {entry.toQty})
                             </span>
                           </div>
                         ))}
@@ -3713,8 +4493,8 @@ function AdminDashboard({ user, role }) {
                 Inventory (admin-created categories)
               </h2>
               <p className={mutedText}>
-                Workers can only update existing categories/items that admins created. If nothing
-                shows, ask an admin to add inventory first.
+                Workers can only update existing categories/items that admins
+                created. If nothing shows, ask an admin to add inventory first.
               </p>
             </div>
           </div>
@@ -3722,24 +4502,31 @@ function AdminDashboard({ user, role }) {
           <div className="mt-4 space-y-2 rounded-2xl border border-brandGreen/10 bg-brandBeige/60 p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-brandGreen">General voice note</p>
+                <p className="text-sm font-semibold text-brandGreen">
+                  General voice note
+                </p>
                 <p className="text-xs text-brandGreen/70">
-                  Optional. Attached to every stock log created in this submission.
+                  Optional. Attached to every stock log created in this
+                  submission.
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={isRecordingVoiceNote ? stopVoiceNoteRecording : startVoiceNoteRecording}
+                onClick={
+                  isRecordingVoiceNote
+                    ? stopVoiceNoteRecording
+                    : startVoiceNoteRecording
+                }
                 disabled={stockUpdateSubmitting}
                 className="rounded-full border border-brandGreen/30 px-4 py-2 text-sm font-semibold text-brandGreen shadow-sm transition hover:bg-brandBeige disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isRecordingVoiceNote
                   ? `Stop recording (${formatDuration(voiceNoteDuration)})`
                   : voiceNote
-                    ? "Record new voice note"
-                    : "Record voice note"}
+                  ? "Record new voice note"
+                  : "Record voice note"}
               </button>
               {voiceNote ? (
                 <button
@@ -3759,9 +4546,15 @@ function AdminDashboard({ user, role }) {
               <p className="text-xs text-brandGreen/70">Recording...</p>
             ) : voiceNote ? (
               <div className="flex flex-wrap items-center gap-3 text-xs text-brandGreen/70">
-                <span>Voice note ready ({formatDuration(voiceNote.duration ?? 0)})</span>
+                <span>
+                  Voice note ready ({formatDuration(voiceNote.duration ?? 0)})
+                </span>
                 {voiceNote.previewUrl ? (
-                  <audio controls className="h-8 w-56" src={voiceNote.previewUrl} />
+                  <audio
+                    controls
+                    className="h-8 w-56"
+                    src={voiceNote.previewUrl}
+                  />
                 ) : null}
               </div>
             ) : null}
@@ -3796,7 +4589,9 @@ function AdminDashboard({ user, role }) {
                   className="space-y-2 rounded-xl border border-brandGreen/15 bg-brandBeige/60 p-4"
                 >
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-brandGreen">{category.label}</h3>
+                    <h3 className="text-lg font-semibold text-brandGreen">
+                      {category.label}
+                    </h3>
                     <span className="text-xs uppercase tracking-wide text-brandGreen/60">
                       Admin-managed
                     </span>
@@ -3808,7 +4603,9 @@ function AdminDashboard({ user, role }) {
                         className="space-y-2 rounded-lg border border-brandGreen/15 bg-white px-3 py-3 shadow-sm"
                       >
                         <div className="flex items-center justify-between">
-                          <p className="font-semibold text-brandGreen">{subGroup.label}</p>
+                          <p className="font-semibold text-brandGreen">
+                            {subGroup.label}
+                          </p>
                           <span className="text-xs text-brandGreen/60">
                             {subGroup.items.length}{" "}
                             {subGroup.items.length === 1 ? "item" : "items"}
@@ -3817,7 +4614,8 @@ function AdminDashboard({ user, role }) {
                         <div className="grid gap-3 md:grid-cols-2">
                           {subGroup.items.map((item) => {
                             const draft = stockUpdateDrafts[item.id] ?? {};
-                            const quantityValue = draft.quantity ?? item.quantity ?? 0;
+                            const quantityValue =
+                              draft.quantity ?? item.quantity ?? 0;
                             const notesValue = draft.notes ?? item.notes ?? "";
                             return (
                               <div
@@ -3826,7 +4624,9 @@ function AdminDashboard({ user, role }) {
                               >
                                 <div className="flex items-center justify-between">
                                   <div>
-                                    <p className="font-semibold text-brandGreen">{item.name}</p>
+                                    <p className="font-semibold text-brandGreen">
+                                      {item.name}
+                                    </p>
                                     <p className="text-xs font-semibold text-brandGreen">
                                       Current:{" "}
                                       <span className="inline-block rounded-full bg-brandGreen/10 px-2 py-1 text-brandGreen">
@@ -3845,7 +4645,7 @@ function AdminDashboard({ user, role }) {
                                     value={quantityValue}
                                     onChange={(event) =>
                                       updateStockUpdateDraft(item.id, {
-                                        quantity: event.target.value
+                                        quantity: event.target.value,
                                       })
                                     }
                                   />
@@ -3855,7 +4655,7 @@ function AdminDashboard({ user, role }) {
                                     value={notesValue}
                                     onChange={(event) =>
                                       updateStockUpdateDraft(item.id, {
-                                        notes: event.target.value
+                                        notes: event.target.value,
                                       })
                                     }
                                     placeholder="Notes (optional)"
@@ -3878,7 +4678,9 @@ function AdminDashboard({ user, role }) {
               type="button"
               onClick={handleSubmitStockUpdates}
               disabled={
-                !hasPendingStockUpdates || stockUpdateSubmitting || isRecordingVoiceNote
+                !hasPendingStockUpdates ||
+                stockUpdateSubmitting ||
+                isRecordingVoiceNote
               }
               className="rounded-full bg-brandGreen px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -3895,7 +4697,9 @@ function AdminDashboard({ user, role }) {
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
                 Users
               </p>
-              <h2 className="text-xl font-bold text-brandGreen">Manage accounts</h2>
+              <h2 className="text-xl font-bold text-brandGreen">
+                Manage accounts
+              </h2>
               <p className={mutedText}>Create, disable, or delete users.</p>
             </div>
             {userMessage ? (
@@ -3915,13 +4719,17 @@ function AdminDashboard({ user, role }) {
               type="email"
               className={inputClass}
               value={userDraft.email}
-              onChange={(event) => setUserDraft((prev) => ({ ...prev, email: event.target.value }))}
+              onChange={(event) =>
+                setUserDraft((prev) => ({ ...prev, email: event.target.value }))
+              }
               placeholder="Email"
             />
             <select
               className={inputClass}
               value={userDraft.role}
-              onChange={(event) => setUserDraft((prev) => ({ ...prev, role: event.target.value }))}
+              onChange={(event) =>
+                setUserDraft((prev) => ({ ...prev, role: event.target.value }))
+              }
             >
               <option value="worker">Worker</option>
               <option value="admin">Admin</option>
@@ -3932,7 +4740,10 @@ function AdminDashboard({ user, role }) {
               className={inputClass}
               value={userDraft.password}
               onChange={(event) =>
-                setUserDraft((prev) => ({ ...prev, password: event.target.value }))
+                setUserDraft((prev) => ({
+                  ...prev,
+                  password: event.target.value,
+                }))
               }
               placeholder="Temporary password (optional)"
             />
@@ -3949,20 +4760,29 @@ function AdminDashboard({ user, role }) {
 
           <div className="mt-4 space-y-2">
             {users.map((account) => (
-              <div key={account.id} className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm">
+              <div
+                key={account.id}
+                className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
+              >
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="font-semibold text-brandGreen">{account.email}</p>
-                    <p className="text-xs text-brandGreen/60">Role: {account.role ?? "-"}</p>
+                    <p className="font-semibold text-brandGreen">
+                      {account.email}
+                    </p>
+                    <p className="text-xs text-brandGreen/60">
+                      Role: {account.role ?? "-"}
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
                       className="rounded-full border border-brandGreen/30 bg-white px-3 py-1 text-xs font-semibold text-brandGreen"
-                      value={userRoleEdits[account.id] ?? account.role ?? "worker"}
+                      value={
+                        userRoleEdits[account.id] ?? account.role ?? "worker"
+                      }
                       onChange={(event) =>
                         setUserRoleEdits((prev) => ({
                           ...prev,
-                          [account.id]: event.target.value
+                          [account.id]: event.target.value,
                         }))
                       }
                     >
@@ -3979,7 +4799,9 @@ function AdminDashboard({ user, role }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleToggleUserStatus(account, !account.disabled)}
+                      onClick={() =>
+                        handleToggleUserStatus(account, !account.disabled)
+                      }
                       className="rounded-full border border-brandGreen/30 px-3 py-1 text-xs font-semibold text-brandGreen"
                     >
                       {account.disabled ? "Enable" : "Disable"}
@@ -4010,7 +4832,8 @@ function AdminDashboard({ user, role }) {
                 Record income & expenses
               </h2>
               <p className={mutedText}>
-                Upload receipts or proofs next to each entry for future reporting.
+                Upload receipts or proofs next to each entry for future
+                reporting.
               </p>
             </div>
             <div className="text-sm text-brandGreen/70">
@@ -4035,6 +4858,9 @@ function AdminDashboard({ user, role }) {
                 >
                   {formatCurrency(financeBalance)}
                 </span>
+              </p>
+              <p className="text-xs text-brandGreen/60">
+                Includes completed or paid orders.
               </p>
             </div>
           </div>
@@ -4072,7 +4898,10 @@ function AdminDashboard({ user, role }) {
                   className={inputClass}
                   value={financeDraft.type}
                   onChange={(event) =>
-                    setFinanceDraft((prev) => ({ ...prev, type: event.target.value }))
+                    setFinanceDraft((prev) => ({
+                      ...prev,
+                      type: event.target.value,
+                    }))
                   }
                 >
                   <option value="income">Income</option>
@@ -4083,7 +4912,10 @@ function AdminDashboard({ user, role }) {
                   className={inputClass}
                   value={financeDraft.amount}
                   onChange={(event) =>
-                    setFinanceDraft((prev) => ({ ...prev, amount: event.target.value }))
+                    setFinanceDraft((prev) => ({
+                      ...prev,
+                      amount: event.target.value,
+                    }))
                   }
                   placeholder="Amount"
                 />
@@ -4092,7 +4924,10 @@ function AdminDashboard({ user, role }) {
                   className={inputClass}
                   value={financeDraft.date}
                   onChange={(event) =>
-                    setFinanceDraft((prev) => ({ ...prev, date: event.target.value }))
+                    setFinanceDraft((prev) => ({
+                      ...prev,
+                      date: event.target.value,
+                    }))
                   }
                 />
               </div>
@@ -4102,7 +4937,10 @@ function AdminDashboard({ user, role }) {
                   className={inputClass}
                   value={financeDraft.description}
                   onChange={(event) =>
-                    setFinanceDraft((prev) => ({ ...prev, description: event.target.value }))
+                    setFinanceDraft((prev) => ({
+                      ...prev,
+                      description: event.target.value,
+                    }))
                   }
                   placeholder="Description"
                 />
@@ -4112,7 +4950,7 @@ function AdminDashboard({ user, role }) {
                   onChange={(event) =>
                     setFinanceDraft((prev) => ({
                       ...prev,
-                      file: event.target.files?.[0] ?? null
+                      file: event.target.files?.[0] ?? null,
                     }))
                   }
                 />
@@ -4158,7 +4996,9 @@ function AdminDashboard({ user, role }) {
                       <select
                         className={inputClass}
                         value={financeTimeScope}
-                        onChange={(event) => setFinanceTimeScope(event.target.value)}
+                        onChange={(event) =>
+                          setFinanceTimeScope(event.target.value)
+                        }
                       >
                         <option value="day">Day</option>
                         <option value="week">Week</option>
@@ -4174,8 +5014,13 @@ function AdminDashboard({ user, role }) {
                         className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-60`}
                         type="month"
                         value={financeMonth}
-                        onChange={(event) => setFinanceMonth(event.target.value)}
-                        disabled={financeTimeScope === "day" || financeTimeScope === "week"}
+                        onChange={(event) =>
+                          setFinanceMonth(event.target.value)
+                        }
+                        disabled={
+                          financeTimeScope === "day" ||
+                          financeTimeScope === "week"
+                        }
                       />
                     </div>
                     <div className="space-y-1 text-sm text-brandGreen">
@@ -4209,7 +5054,9 @@ function AdminDashboard({ user, role }) {
                         className={inputClass}
                         type="number"
                         value={financeMinAmount}
-                        onChange={(event) => setFinanceMinAmount(event.target.value)}
+                        onChange={(event) =>
+                          setFinanceMinAmount(event.target.value)
+                        }
                       />
                     </div>
                     <div className="space-y-1 text-sm text-brandGreen">
@@ -4226,7 +5073,9 @@ function AdminDashboard({ user, role }) {
                         className={inputClass}
                         type="number"
                         value={financeMaxAmount}
-                        onChange={(event) => setFinanceMaxAmount(event.target.value)}
+                        onChange={(event) =>
+                          setFinanceMaxAmount(event.target.value)
+                        }
                       />
                     </div>
                     <div className="flex items-end justify-between gap-3">
@@ -4235,7 +5084,9 @@ function AdminDashboard({ user, role }) {
                           className="h-4 w-4 rounded border-brandGreen text-brandGreen focus:ring-brandGreen"
                           type="checkbox"
                           checked={financeHasReceipt}
-                          onChange={(event) => setFinanceHasReceipt(event.target.checked)}
+                          onChange={(event) =>
+                            setFinanceHasReceipt(event.target.checked)
+                          }
                         />
                         Has receipt
                       </label>
@@ -4260,36 +5111,40 @@ function AdminDashboard({ user, role }) {
                     No income entries yet.
                   </div>
                 ) : (
-                  financeIncomeEntries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
-                    >
-                      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                        <div className="space-y-0.5">
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
-                            Income · {entry.date ?? "-"}
-                          </p>
-                          <p className="text-sm text-brandGreen">
-                            {entry.description || "No description"}
-                          </p>
+                  financeIncomeEntries.map((entry) => {
+                    const incomeLabel =
+                      entry.source === "order" ? "Order income" : "Income";
+                    return (
+                      <div
+                        key={entry.id}
+                        className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
+                      >
+                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                              {incomeLabel} · {entry.date || "-"}
+                            </p>
+                            <p className="text-sm text-brandGreen">
+                              {entry.description || "No description"}
+                            </p>
+                          </div>
+                          <span className="text-lg font-semibold text-emerald-700">
+                            {formatCurrency(Number(entry.amount ?? 0))}
+                          </span>
                         </div>
-                        <span className="text-lg font-semibold text-emerald-700">
-                          {formatCurrency(Number(entry.amount ?? 0))}
-                        </span>
+                        {entry.attachmentUrl ? (
+                          <a
+                            href={entry.attachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-brandGreen underline decoration-brandGreen/40 underline-offset-4"
+                          >
+                            {entry.attachmentName ?? "View attachment"}
+                          </a>
+                        ) : null}
                       </div>
-                      {entry.attachmentUrl ? (
-                        <a
-                          href={entry.attachmentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-brandGreen underline decoration-brandGreen/40 underline-offset-4"
-                        >
-                          {entry.attachmentName ?? "View attachment"}
-                        </a>
-                      ) : null}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -4346,22 +5201,247 @@ function AdminDashboard({ user, role }) {
 
       {resolvedTab === "reports" && (
         <div className={`${panelClass} space-y-5`}>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="space-y-3 rounded-2xl border border-brandGreen/10 bg-white/80 p-4 shadow-inner">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                  Report filters
+                </p>
+                <p className="text-sm text-brandGreen/70">
+                  Showing {reportOrders.length} orders that match the filters.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportShowFilters((prev) => !prev)}
+                className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70"
+              >
+                {reportShowFilters ? "Hide filters" : "Show filters"}
+              </button>
+            </div>
+            {reportShowFilters ? (
+              <>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="space-y-1 text-sm text-brandGreen">
+                    <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                      Time scope
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={reportTimeScope}
+                      onChange={(event) =>
+                        setReportTimeScope(event.target.value)
+                      }
+                    >
+                      <option value="day">Day</option>
+                      <option value="week">Week</option>
+                      <option value="month">Month</option>
+                      <option value="year">Year</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </div>
+                  {reportTimeScope === "day" ? (
+                    <div className="space-y-1 text-sm text-brandGreen">
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                        Day
+                      </label>
+                      <input
+                        className={inputClass}
+                        type="date"
+                        value={reportDay}
+                        onChange={(event) => setReportDay(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  {reportTimeScope === "week" ? (
+                    <div className="space-y-1 text-sm text-brandGreen">
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                        Week starting
+                      </label>
+                      <input
+                        className={inputClass}
+                        type="date"
+                        value={reportWeekStart}
+                        onChange={(event) =>
+                          setReportWeekStart(event.target.value)
+                        }
+                      />
+                    </div>
+                  ) : null}
+                  {reportTimeScope === "month" ? (
+                    <div className="space-y-1 text-sm text-brandGreen">
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                        Month
+                      </label>
+                      <input
+                        className={inputClass}
+                        type="month"
+                        value={reportMonth}
+                        onChange={(event) => setReportMonth(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  {reportTimeScope === "year" ? (
+                    <div className="space-y-1 text-sm text-brandGreen">
+                      <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                        Year
+                      </label>
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min="2000"
+                        max="2100"
+                        value={reportYear}
+                        onChange={(event) => setReportYear(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  {reportTimeScope === "custom" ? (
+                    <>
+                      <div className="space-y-1 text-sm text-brandGreen">
+                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                          Start date
+                        </label>
+                        <input
+                          className={inputClass}
+                          type="date"
+                          value={reportCustomStart}
+                          onChange={(event) =>
+                            setReportCustomStart(event.target.value)
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1 text-sm text-brandGreen">
+                        <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                          End date
+                        </label>
+                        <input
+                          className={inputClass}
+                          type="date"
+                          value={reportCustomEnd}
+                          onChange={(event) =>
+                            setReportCustomEnd(event.target.value)
+                          }
+                        />
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <div className="space-y-1 text-sm text-brandGreen">
+                    <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                      Order type
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={reportOrderType}
+                      onChange={(event) =>
+                        setReportOrderType(event.target.value)
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="eggs">Eggs</option>
+                      <option value="livestock">Livestock</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1 text-sm text-brandGreen">
+                    <label className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                      Paid
+                    </label>
+                    <select
+                      className={inputClass}
+                      value={reportPaidFilter}
+                      onChange={(event) =>
+                        setReportPaidFilter(event.target.value)
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="paid">Paid</option>
+                      <option value="unpaid">Unpaid</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-brandGreen">
+                      <input
+                        className="h-4 w-4 rounded border-brandGreen text-brandGreen focus:ring-brandGreen"
+                        type="checkbox"
+                        checked={reportIncludeArchived}
+                        onChange={(event) =>
+                          setReportIncludeArchived(event.target.checked)
+                        }
+                      />
+                      Include archived
+                    </label>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                    Order statuses
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {REPORT_ORDER_STATUSES.map((status) => (
+                      <label
+                        key={status.id}
+                        className="inline-flex items-center gap-2 rounded-full border border-brandGreen/20 bg-white px-3 py-1 text-xs font-semibold text-brandGreen"
+                      >
+                        <input
+                          className="h-3.5 w-3.5 rounded border-brandGreen text-brandGreen focus:ring-brandGreen"
+                          type="checkbox"
+                          checked={reportStatusFilter.includes(status.id)}
+                          onChange={() =>
+                            setReportStatusFilter((prev) =>
+                              prev.includes(status.id)
+                                ? prev.filter((id) => id !== status.id)
+                                : [...prev, status.id]
+                            )
+                          }
+                        />
+                        {status.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="rounded-2xl border border-brandGreen/10 bg-brandBeige/60 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
-                Orders
+                Orders (filtered)
               </p>
-              <p className="text-3xl font-bold text-brandGreen">{ordersSummary.totalOrders}</p>
+              <p className="text-3xl font-bold text-brandGreen">
+                {ordersSummary.totalOrders}
+              </p>
               <p className="text-sm text-brandGreen/70">
                 Total value: {formatCurrency(ordersSummary.totalValue)}
+              </p>
+              <p className="text-xs text-brandGreen/60">
+                Filtered by report settings
+              </p>
+            </div>
+            <div className="rounded-2xl border border-brandGreen/10 bg-white/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
+                Archived orders (filtered)
+              </p>
+              <p className="text-3xl font-bold text-brandGreen">
+                {archivedOrdersSummary.totalOrders}
+              </p>
+              <p className="text-sm text-brandGreen/70">
+                Total value: {formatCurrency(archivedOrdersSummary.totalValue)}
               </p>
             </div>
             <div className="rounded-2xl border border-brandGreen/10 bg-brandBeige/60 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
                 Stock
               </p>
-              <p className="text-3xl font-bold text-brandGreen">{stockSummary.totalItems}</p>
-              <p className="text-sm text-brandGreen/70">Low stock: {stockSummary.lowStock}</p>
+              <p className="text-3xl font-bold text-brandGreen">
+                {stockSummary.totalItems}
+              </p>
+              <p className="text-sm text-brandGreen/70">
+                Low stock: {stockSummary.lowStock}
+              </p>
             </div>
             <div className="rounded-2xl border border-brandGreen/10 bg-brandBeige/60 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brandGreen/70">
@@ -4369,7 +5449,9 @@ function AdminDashboard({ user, role }) {
               </p>
               <p
                 className={`text-3xl font-bold ${
-                  financeSummaryBalance >= 0 ? "text-emerald-700" : "text-red-700"
+                  financeSummaryBalance >= 0
+                    ? "text-emerald-700"
+                    : "text-red-700"
                 }`}
               >
                 {formatCurrency(financeSummaryBalance)}
@@ -4377,6 +5459,9 @@ function AdminDashboard({ user, role }) {
               <p className="text-xs text-brandGreen/70">
                 Expenses: {formatCurrency(financeSummary.expense)} · Balance:{" "}
                 {formatCurrency(financeSummaryBalance)}
+              </p>
+              <p className="text-xs text-brandGreen/60">
+                Includes completed or paid orders.
               </p>
             </div>
           </div>
@@ -4388,7 +5473,7 @@ function AdminDashboard({ user, role }) {
                   Order status distribution
                 </p>
                 <span className="text-xs text-brandGreen/70">
-                  {reportOrders.length} orders
+                  {reportOrders.length} orders (filtered)
                 </span>
               </div>
               <div className="space-y-2">
@@ -4427,11 +5512,17 @@ function AdminDashboard({ user, role }) {
                     <div className="flex h-28 items-end gap-1">
                       <div
                         className="rounded-t-xl bg-emerald-500"
-                        style={{ width: "8px", height: `${entry.incomePercent}%` }}
+                        style={{
+                          width: "8px",
+                          height: `${entry.incomePercent}%`,
+                        }}
                       ></div>
                       <div
                         className="rounded-t-xl bg-red-500"
-                        style={{ width: "8px", height: `${entry.expensePercent}%` }}
+                        style={{
+                          width: "8px",
+                          height: `${entry.expensePercent}%`,
+                        }}
                       ></div>
                     </div>
                     <span className="text-[0.6rem]">{entry.label}</span>
@@ -4440,10 +5531,12 @@ function AdminDashboard({ user, role }) {
               </div>
               <div className="flex items-center justify-between text-[0.65rem] text-brandGreen/60">
                 <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500"></span>Income
+                  <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                  Income
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-red-500"></span>Expense
+                  <span className="h-2 w-2 rounded-full bg-red-500"></span>
+                  Expense
                 </span>
               </div>
             </div>
@@ -4480,7 +5573,9 @@ function AdminDashboard({ user, role }) {
                   const percent =
                     stockSummary.totalQuantity === 0
                       ? 0
-                      : Math.round((entry.quantity / stockSummary.totalQuantity) * 100);
+                      : Math.round(
+                          (entry.quantity / stockSummary.totalQuantity) * 100
+                        );
                   return (
                     <div key={entry.label}>
                       <div className="flex items-center justify-between text-xs text-brandGreen/70">
@@ -4516,7 +5611,9 @@ function AdminDashboard({ user, role }) {
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-xl border border-brandGreen/30 bg-white/80 p-3 text-sm">
-                <p className="text-xs uppercase tracking-[0.2em] text-brandGreen/50">Income</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-brandGreen/50">
+                  Income
+                </p>
                 <p className="text-2xl font-semibold text-emerald-700">
                   {formatCurrency(financeSummary.income)}
                 </p>
@@ -4525,12 +5622,15 @@ function AdminDashboard({ user, role }) {
                 </p>
               </div>
               <div className="rounded-xl border border-brandGreen/30 bg-white/80 p-3 text-sm">
-                <p className="text-xs uppercase tracking-[0.2em] text-brandGreen/50">Expenses</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-brandGreen/50">
+                  Expenses
+                </p>
                 <p className="text-2xl font-semibold text-red-700">
                   {formatCurrency(financeSummary.expense)}
                 </p>
                 <p className="text-xs text-brandGreen/70">
-                  Average {formatCurrency(financeActivity.averageExpense)} per entry
+                  Average {formatCurrency(financeActivity.averageExpense)} per
+                  entry
                 </p>
               </div>
               <div className="rounded-xl border border-brandGreen/30 bg-white/80 p-3 text-sm">
@@ -4539,7 +5639,9 @@ function AdminDashboard({ user, role }) {
                 </p>
                 <p
                   className={`text-2xl font-semibold ${
-                    financeSummaryBalance >= 0 ? "text-emerald-700" : "text-red-700"
+                    financeSummaryBalance >= 0
+                      ? "text-emerald-700"
+                      : "text-red-700"
                   }`}
                 >
                   {formatCurrency(financeSummaryBalance)}
@@ -4600,15 +5702,23 @@ function AdminDashboard({ user, role }) {
           collectionName={selectedOrderCollection}
           deliveryOptions={modalDeliveryOptions}
           itemOptions={modalItemOptions}
-          onPaidToggle={(order) => handlePaidToggle(selectedOrderCollection, order)}
+          onPaidToggle={(order) =>
+            handlePaidToggle(selectedOrderCollection, order)
+          }
           onSendDispatchEmail={(order) =>
             handleSendDispatchEmail(selectedOrderCollection, order)
           }
           onClose={() => setSelectedOrder(null)}
           onUpdate={(updates) =>
-            handleOrderUpdate(selectedOrderCollection, selectedOrder.id, updates)
+            handleOrderUpdate(
+              selectedOrderCollection,
+              selectedOrder.id,
+              updates
+            )
           }
-          onDelete={() => handleOrderDelete(selectedOrderCollection, selectedOrder)}
+          onDelete={() =>
+            handleOrderDelete(selectedOrderCollection, selectedOrder)
+          }
         />
       ) : null}
     </div>
@@ -4627,7 +5737,7 @@ function DeliveryOptionsPanel({
   error,
   onAdd,
   onSave,
-  onDelete
+  onDelete,
 }) {
   return (
     <div className={panelClass}>
@@ -4656,14 +5766,18 @@ function DeliveryOptionsPanel({
         <input
           type="text"
           value={draft.label}
-          onChange={(event) => setDraft((prev) => ({ ...prev, label: event.target.value }))}
+          onChange={(event) =>
+            setDraft((prev) => ({ ...prev, label: event.target.value }))
+          }
           placeholder="Label"
           className={inputClass}
         />
         <input
           type="number"
           value={draft.cost}
-          onChange={(event) => setDraft((prev) => ({ ...prev, cost: event.target.value }))}
+          onChange={(event) =>
+            setDraft((prev) => ({ ...prev, cost: event.target.value }))
+          }
           placeholder="Cost"
           className={inputClass}
         />
@@ -4687,10 +5801,13 @@ function DeliveryOptionsPanel({
           options.map((option) => {
             const edit = edits[option.id] ?? {
               label: option.label ?? "",
-              cost: option.cost ?? 0
+              cost: option.cost ?? 0,
             };
             return (
-              <div key={option.id} className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm">
+              <div
+                key={option.id}
+                className="rounded-xl border border-brandGreen/15 bg-white px-4 py-3 shadow-sm"
+              >
                 <div className="grid gap-2 md:grid-cols-3">
                   <input
                     type="text"
@@ -4699,7 +5816,7 @@ function DeliveryOptionsPanel({
                     onChange={(event) =>
                       setEdits((prev) => ({
                         ...prev,
-                        [option.id]: { ...edit, label: event.target.value }
+                        [option.id]: { ...edit, label: event.target.value },
                       }))
                     }
                   />
@@ -4710,7 +5827,7 @@ function DeliveryOptionsPanel({
                     onChange={(event) =>
                       setEdits((prev) => ({
                         ...prev,
-                        [option.id]: { ...edit, cost: event.target.value }
+                        [option.id]: { ...edit, cost: event.target.value },
                       }))
                     }
                   />
@@ -4749,7 +5866,7 @@ function OrderDetailModal({
   onUpdate,
   onDelete,
   onPaidToggle,
-  onSendDispatchEmail
+  onSendDispatchEmail,
 }) {
   const [draft, setDraft] = useState({
     orderStatus: order.orderStatus ?? "pending",
@@ -4757,7 +5874,7 @@ function OrderDetailModal({
     sendDate: order.sendDate ?? "",
     trackingLink: order.trackingLink ?? "",
     notes: order.notes ?? "",
-    internalNote: order.internalNote ?? ""
+    internalNote: order.internalNote ?? "",
   });
   const [lineItems, setLineItems] = useState([]);
   const [copyNotice, setCopyNotice] = useState("");
@@ -4783,7 +5900,7 @@ function OrderDetailModal({
       sendDate: order.sendDate ?? "",
       trackingLink: order.trackingLink ?? "",
       notes: order.notes ?? "",
-      internalNote: order.internalNote ?? ""
+      internalNote: order.internalNote ?? "",
     });
     const baseLines = Array.isArray(order.eggs)
       ? order.eggs.map((item) => ({
@@ -4792,7 +5909,7 @@ function OrderDetailModal({
           label: item.label ?? "",
           price: Number(item.price ?? 0),
           specialPrice: item.specialPrice ?? null,
-          quantity: item.quantity ?? 0
+          quantity: item.quantity ?? 0,
         }))
       : [];
     if (baseLines.length === 0) {
@@ -4803,7 +5920,7 @@ function OrderDetailModal({
         label: fallback?.label ?? "",
         price: Number(fallback?.price ?? 0),
         specialPrice: fallback?.specialPrice ?? null,
-        quantity: 0
+        quantity: 0,
       });
     }
     setLineItems(baseLines);
@@ -4818,26 +5935,35 @@ function OrderDetailModal({
     typeof order.eggsTotal === "number"
       ? order.eggsTotal
       : Array.isArray(order.eggs)
-        ? order.eggs.reduce((sum, item) => {
-            const price =
-              item.specialPrice === null || item.specialPrice === undefined || item.specialPrice === 0
-                ? item.price
-                : item.specialPrice;
-            return sum + Number(price ?? 0) * Number(item.quantity ?? 0);
-          }, 0)
-        : 0;
+      ? order.eggs.reduce((sum, item) => {
+          const price =
+            item.specialPrice === null ||
+            item.specialPrice === undefined ||
+            item.specialPrice === 0
+              ? item.price
+              : item.specialPrice;
+          return sum + Number(price ?? 0) * Number(item.quantity ?? 0);
+        }, 0)
+      : 0;
 
   const deliveryCost =
     typeof order.deliveryCost === "number"
       ? order.deliveryCost
-      : deliveryOptions.find((option) => option.id === order.deliveryOptionId)?.cost ??
-        extractCost(order.deliveryOption);
+      : deliveryOptions.find((option) => option.id === order.deliveryOptionId)
+          ?.cost ?? extractCost(order.deliveryOption);
 
   const totalCost =
-    typeof order.totalCost === "number" ? order.totalCost : Number(eggsTotal) + Number(deliveryCost);
+    typeof order.totalCost === "number"
+      ? order.totalCost
+      : Number(eggsTotal) + Number(deliveryCost);
 
-  const orderFullName = [order.name, order.surname].filter(Boolean).join(" ").trim();
-  const contactLine = [order.email, order.cellphone].filter(Boolean).join(" · ");
+  const orderFullName = [order.name, order.surname]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const contactLine = [order.email, order.cellphone]
+    .filter(Boolean)
+    .join(" · ");
   const addressText = order.address?.trim() || "No address provided.";
 
   const selectClass =
@@ -4858,7 +5984,11 @@ function OrderDetailModal({
   const handleStatusChange = async (value) => {
     setDraft((prev) => ({ ...prev, orderStatus: value }));
     try {
-      await onUpdate({ orderStatus: value });
+      const updates = { orderStatus: value };
+      if (value === "completed") {
+        updates.completedAt = serverTimestamp();
+      }
+      await onUpdate(updates);
     } catch (err) {
       console.error("order status update error", err);
     }
@@ -4872,7 +6002,7 @@ function OrderDetailModal({
       await onUpdate({
         deliveryOptionId: value,
         deliveryOption: selected.label ?? "",
-        deliveryCost: Number(selected.cost ?? 0)
+        deliveryCost: Number(selected.cost ?? 0),
       });
     } catch (err) {
       console.error("delivery update error", err);
@@ -4918,7 +6048,9 @@ function OrderDetailModal({
 
   const handleLineChange = (lineId, updates) => {
     setLineItems((prev) =>
-      prev.map((line) => (line.lineId === lineId ? { ...line, ...updates } : line))
+      prev.map((line) =>
+        line.lineId === lineId ? { ...line, ...updates } : line
+      )
     );
   };
 
@@ -4928,7 +6060,7 @@ function OrderDetailModal({
       itemId: value,
       label: selected?.label ?? "",
       price: Number(selected?.price ?? 0),
-      specialPrice: selected?.specialPrice ?? null
+      specialPrice: selected?.specialPrice ?? null,
     });
   };
 
@@ -4942,8 +6074,8 @@ function OrderDetailModal({
         label: fallback?.label ?? "",
         price: Number(fallback?.price ?? 0),
         specialPrice: fallback?.specialPrice ?? null,
-        quantity: 0
-      }
+        quantity: 0,
+      },
     ]);
   };
 
@@ -4953,13 +6085,16 @@ function OrderDetailModal({
 
   const handleUpdateLines = async () => {
     const nextEggs = lineItems
-      .filter((line) => Number(line.quantity ?? 0) > 0 && (line.itemId || line.label))
+      .filter(
+        (line) => Number(line.quantity ?? 0) > 0 && (line.itemId || line.label)
+      )
       .map((line) => ({
         id: line.itemId,
         label: line.label,
         quantity: Number(line.quantity ?? 0),
         price: Number(line.price ?? 0),
-        specialPrice: line.specialPrice === "" ? null : line.specialPrice ?? null
+        specialPrice:
+          line.specialPrice === "" ? null : line.specialPrice ?? null,
       }));
     try {
       await onUpdate({ eggs: nextEggs });
@@ -4974,13 +6109,15 @@ function OrderDetailModal({
     try {
       const fileRef = storageRef(
         storage,
-        `orders/${collectionName}/${order.id}/${attachment.key}_${Date.now()}_${file.name}`
+        `orders/${collectionName}/${order.id}/${attachment.key}_${Date.now()}_${
+          file.name
+        }`
       );
       await uploadBytes(fileRef, file);
       const url = await getDownloadURL(fileRef);
       await onUpdate({
         [attachment.urlField]: url,
-        [attachment.nameField]: file.name
+        [attachment.nameField]: file.name,
       });
     } catch (err) {
       console.error("attachment upload error", err);
@@ -5008,7 +6145,7 @@ function OrderDetailModal({
         invoiceNumber,
         invoiceDateLabel,
         deliveryLabel,
-        sendDateLabel
+        sendDateLabel,
       });
 
       const safeInvoiceNumber = invoiceNumber.replace(/[^A-Za-z0-9_-]/g, "");
@@ -5023,7 +6160,7 @@ function OrderDetailModal({
         invoiceUrl: url,
         invoiceFileName: fileName,
         invoiceNumber,
-        invoiceCreatedAt: serverTimestamp()
+        invoiceCreatedAt: serverTimestamp(),
       });
       setInvoiceMessage("Invoice generated.");
     } catch (err) {
@@ -5095,7 +6232,9 @@ function OrderDetailModal({
             <h3 className="text-2xl font-bold text-brandGreen">
               {orderFullName || "Customer"}
             </h3>
-            <p className="text-sm font-mono text-brandGreen">{order.orderNumber || "-"}</p>
+            <p className="text-sm font-mono text-brandGreen">
+              {order.orderNumber || "-"}
+            </p>
             <p className="text-brandGreen/70">{contactLine || "-"}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -5117,7 +6256,9 @@ function OrderDetailModal({
         </div>
 
         {copyNotice ? (
-          <p className="mt-2 text-xs font-semibold text-brandGreen/70">{copyNotice}</p>
+          <p className="mt-2 text-xs font-semibold text-brandGreen/70">
+            {copyNotice}
+          </p>
         ) : null}
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -5145,7 +6286,10 @@ function OrderDetailModal({
                   type="url"
                   value={draft.trackingLink}
                   onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, trackingLink: event.target.value }))
+                    setDraft((prev) => ({
+                      ...prev,
+                      trackingLink: event.target.value,
+                    }))
                   }
                   className="w-full rounded-lg border border-brandGreen/30 bg-white px-3 py-2 text-brandGreen placeholder:text-brandGreen/50 focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30"
                   placeholder="https://..."
@@ -5172,21 +6316,30 @@ function OrderDetailModal({
             </p>
             <div className="space-y-1 text-sm text-brandGreen">
               <p>
-                Subtotal: <span className="font-semibold">{formatCurrency(eggsTotal)}</span>
+                Subtotal:{" "}
+                <span className="font-semibold">
+                  {formatCurrency(eggsTotal)}
+                </span>
               </p>
               <p>
                 Delivery:{" "}
-                <span className="font-semibold">{formatCurrency(deliveryCost)}</span>
+                <span className="font-semibold">
+                  {formatCurrency(deliveryCost)}
+                </span>
               </p>
               <p className="text-lg font-bold text-brandGreen">
                 Total: {formatCurrency(totalCost)}
               </p>
             </div>
-            <p className="text-sm text-brandGreen">Paid: {order.paid ? "Yes" : "No"}</p>
+            <p className="text-sm text-brandGreen">
+              Paid: {order.paid ? "Yes" : "No"}
+            </p>
             <p className="text-sm text-brandGreen">
               Delivery: {order.deliveryOption ?? "-"}
             </p>
-            <p className="text-sm text-brandGreen">Send date: {order.sendDate ?? "-"}</p>
+            <p className="text-sm text-brandGreen">
+              Send date: {order.sendDate ?? "-"}
+            </p>
           </div>
         </div>
 
@@ -5196,7 +6349,9 @@ function OrderDetailModal({
               Delivery address
             </p>
             <div className="flex items-center gap-2">
-              <p className="text-brandGreen whitespace-pre-line">{addressText}</p>
+              <p className="text-brandGreen whitespace-pre-line">
+                {addressText}
+              </p>
               <button
                 type="button"
                 aria-label="Copy address"
@@ -5213,7 +6368,9 @@ function OrderDetailModal({
             </p>
             <div className="space-y-1 text-brandGreen">
               <div className="flex items-center gap-2">
-                <span className="font-semibold">{orderFullName || "Customer"}</span>
+                <span className="font-semibold">
+                  {orderFullName || "Customer"}
+                </span>
                 <button
                   type="button"
                   aria-label="Copy name"
@@ -5286,12 +6443,16 @@ function OrderDetailModal({
                           {attachmentName || "View file"}
                         </a>
                       ) : (
-                        <p className="text-sm text-brandGreen/70">Not uploaded yet.</p>
+                        <p className="text-sm text-brandGreen/70">
+                          Not uploaded yet.
+                        </p>
                       )}
                     </div>
                     <label
                       className={`inline-flex items-center gap-2 rounded-full border border-brandGreen/30 px-3 py-1 text-xs font-semibold text-brandGreen transition hover:bg-brandBeige ${
-                        isUploading ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                        isUploading
+                          ? "cursor-not-allowed opacity-60"
+                          : "cursor-pointer"
                       }`}
                     >
                       <input
@@ -5300,13 +6461,18 @@ function OrderDetailModal({
                         type="file"
                         disabled={isUploading}
                         onChange={(event) =>
-                          handleAttachmentUpload(attachment, event.target.files?.[0])
+                          handleAttachmentUpload(
+                            attachment,
+                            event.target.files?.[0]
+                          )
                         }
                       />
                       {isUploading ? "Uploading..." : "Upload file"}
                     </label>
                   </div>
-                  <p className="text-xs text-brandGreen/60">{attachment.description}</p>
+                  <p className="text-xs text-brandGreen/60">
+                    {attachment.description}
+                  </p>
                 </div>
               );
             })}
@@ -5327,8 +6493,8 @@ function OrderDetailModal({
               {invoiceGenerating
                 ? "Generating..."
                 : order.invoiceUrl
-                  ? "Regenerate invoice"
-                  : "Generate invoice"}
+                ? "Regenerate invoice"
+                : "Generate invoice"}
             </button>
             {order.invoiceUrl ? (
               <>
@@ -5359,7 +6525,9 @@ function OrderDetailModal({
             ) : null}
           </div>
           {invoiceMessage ? (
-            <p className="text-xs font-semibold text-brandGreen/70">{invoiceMessage}</p>
+            <p className="text-xs font-semibold text-brandGreen/70">
+              {invoiceMessage}
+            </p>
           ) : null}
         </div>
 
@@ -5432,7 +6600,10 @@ function OrderDetailModal({
             className="w-full rounded-lg border border-brandGreen/30 bg-brandBeige/40 px-3 py-2 text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30"
             value={draft.internalNote}
             onChange={(event) =>
-              setDraft((prev) => ({ ...prev, internalNote: event.target.value }))
+              setDraft((prev) => ({
+                ...prev,
+                internalNote: event.target.value,
+              }))
             }
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5456,7 +6627,9 @@ function OrderDetailModal({
           </p>
           <div className="space-y-2">
             {lineItems.map((line) => {
-              const optionExists = itemOptions.some((item) => item.id === line.itemId);
+              const optionExists = itemOptions.some(
+                (item) => item.id === line.itemId
+              );
               return (
                 <div
                   key={line.lineId}
@@ -5465,7 +6638,9 @@ function OrderDetailModal({
                   <select
                     className="w-full rounded-lg border border-brandGreen/30 bg-white px-3 py-2 text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30"
                     value={line.itemId}
-                    onChange={(event) => handleSelectItem(line.lineId, event.target.value)}
+                    onChange={(event) =>
+                      handleSelectItem(line.lineId, event.target.value)
+                    }
                   >
                     <option value="">{`Select ${itemLabelSingular}`}</option>
                     {itemOptions.map((option) => (
@@ -5474,7 +6649,9 @@ function OrderDetailModal({
                       </option>
                     ))}
                     {!optionExists && line.itemId ? (
-                      <option value={line.itemId}>{line.label || "Unknown"}</option>
+                      <option value={line.itemId}>
+                        {line.label || "Unknown"}
+                      </option>
                     ) : null}
                   </select>
                   <input
@@ -5484,7 +6661,10 @@ function OrderDetailModal({
                     value={line.quantity}
                     onChange={(event) =>
                       handleLineChange(line.lineId, {
-                        quantity: event.target.value === "" ? "" : Number(event.target.value)
+                        quantity:
+                          event.target.value === ""
+                            ? ""
+                            : Number(event.target.value),
                       })
                     }
                   />

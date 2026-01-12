@@ -8,12 +8,12 @@ const db = admin.firestore();
 const BOOTSTRAP_ADMINS = [
   "bradsgbaker14@gmail.com",
   "admin@thecrookedfence.co.za",
-  "stolschristopher60@gmail.com"
+  "stolschristopher60@gmail.com",
 ];
 
 const ADMIN_EMAIL_EXCLUSIONS = new Set([
   "bradsgbaker14@gmail.com",
-  "admin@thecrookedfence.co.za"
+  "admin@thecrookedfence.co.za",
 ]);
 const ADMIN_EMAIL_FALLBACKS = ["stolschristopher60@gmail.com"];
 
@@ -25,7 +25,7 @@ const ORDER_STATUS_LABELS = {
   scheduled_dispatch: "Scheduled for Dispatch",
   shipped: "Shipped",
   completed: "Completed",
-  archived: "Archived"
+  archived: "Archived",
 };
 
 const ORDER_NUMBER_PAD = 4;
@@ -39,10 +39,10 @@ const PAYMENT_DETAILS = {
   accountName: "The Golden Quail",
   accountType: "Gold Business Account",
   accountNumber: "63049448219",
-  branchCode: "250655"
+  branchCode: "250655",
 };
 const INDEMNITY_TEXT =
-  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control - such as handling during shipping, incubation conditions, and environmental variables - that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.";
+  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control—such as handling during shipping, incubation conditions, and environmental variables—that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.\n \n Availability Notice: Some eggs are subject to a 3–6 week waiting period and may not be available for immediate shipment. By placing an order, the buyer acknowledges and accepts this potential delay.\n \nExtra Eggs Disclaimer: Extra eggs are never guaranteed. While we may occasionally include additional eggs when available, this is done at our discretion and should not be expected or assumed as part of any order.";
 
 const EMAIL_STYLES = `
   body { margin:0; padding:0; background:#f8fafc; color:#0f172a; }
@@ -79,7 +79,8 @@ const parseOrderNumber = (value) => {
   return match ? Number(match[1]) : 0;
 };
 
-const formatOrderNumber = (value) => `#${String(value).padStart(ORDER_NUMBER_PAD, "0")}`;
+const formatOrderNumber = (value) =>
+  `#${String(value).padStart(ORDER_NUMBER_PAD, "0")}`;
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -101,7 +102,8 @@ const getCustomerName = (order) => {
   return full || "Customer";
 };
 
-const getOrderStatusLabel = (status) => ORDER_STATUS_LABELS[status] || status || "-";
+const getOrderStatusLabel = (status) =>
+  ORDER_STATUS_LABELS[status] || status || "-";
 
 const getPaidLabel = (order) => {
   const raw = order?.paid;
@@ -209,11 +211,17 @@ const buildPaymentSectionHtml = (orderNumber) => {
 const buildIndemnitySectionHtml = () => `
   <div class="divider"></div>
   <h3 style="margin: 0 0 8px;">Indemnity</h3>
-  <p>${escapeHtml(INDEMNITY_TEXT)}</p>
+  <p>${escapeHtml(INDEMNITY_TEXT).replace(/\n/g, "<br/>")}</p>
   <p class="muted">By submitting an order you accept these terms.</p>
 `;
 
-const buildOrderSummaryCard = ({ heading, items, totals, collectionName, paidLabel }) => {
+const buildOrderSummaryCard = ({
+  heading,
+  items,
+  totals,
+  collectionName,
+  paidLabel,
+}) => {
   const itemLabel = collectionName === "livestockOrders" ? "Items" : "Eggs";
   const paidLine = paidLabel
     ? `<p><strong>Paid:</strong> ${escapeHtml(paidLabel)}</p>`
@@ -253,19 +261,26 @@ const getRoleFromContext = (context) => {
 const requireAdmin = (context) => {
   const role = getRoleFromContext(context);
   if (role !== "admin" && role !== "super_admin") {
-    throw new functions.https.HttpsError("permission-denied", "Admin access required.");
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Admin access required."
+    );
   }
 };
 
 const requireStaff = (context) => {
   const role = getRoleFromContext(context);
   if (role !== "admin" && role !== "super_admin" && role !== "worker") {
-    throw new functions.https.HttpsError("permission-denied", "Staff access required.");
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "Staff access required."
+    );
   }
 };
 
 const getResendClient = () => {
-  const apiKey = process.env.RESEND_API_KEY || functions.config()?.resend?.api_key;
+  const apiKey =
+    process.env.RESEND_API_KEY || functions.config()?.resend?.api_key;
   return apiKey ? new Resend(apiKey) : null;
 };
 
@@ -278,12 +293,15 @@ const getResendFrom = () => {
 };
 
 const getAdminRecipients = () => {
-  const email = process.env.ADMIN_EMAIL || functions.config()?.admin?.email || "";
+  const email =
+    process.env.ADMIN_EMAIL || functions.config()?.admin?.email || "";
   if (!email) return [];
   const recipients = String(email)
     .split(/[;,\s]+/)
     .map((address) => address.trim())
-    .filter((address) => address && !ADMIN_EMAIL_EXCLUSIONS.has(address.toLowerCase()));
+    .filter(
+      (address) => address && !ADMIN_EMAIL_EXCLUSIONS.has(address.toLowerCase())
+    );
   return recipients.length > 0 ? recipients : ADMIN_EMAIL_FALLBACKS;
 };
 
@@ -304,7 +322,7 @@ const sendEmail = async ({ to, subject, html, text }) => {
     to: filtered,
     subject,
     html,
-    text
+    text,
   });
 };
 
@@ -377,7 +395,8 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
   const notes = order.notes || "";
   const statusLabel = getOrderStatusLabel(order.orderStatus || "pending");
   const paidLabel = getPaidLabel(order);
-  const orderTypeLabel = collectionName === "livestockOrders" ? "livestock" : "egg";
+  const orderTypeLabel =
+    collectionName === "livestockOrders" ? "livestock" : "egg";
   const intro = `We’ve received your ${orderTypeLabel} order and will keep you updated.`;
   const whatsappLine = `Please follow up via WhatsApp (${WHATSAPP_NUMBER}) for order updates and to confirm payment by sending proof of payment.`;
 
@@ -386,7 +405,7 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
     items,
     totals,
     collectionName,
-    paidLabel
+    paidLabel,
   });
 
   const detailLines = `
@@ -412,7 +431,7 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
     title: "Thank you for your order!",
     intro,
     preheader: intro,
-    body: customerBody
+    body: customerBody,
   });
 
   const adminRecipients = getAdminRecipients();
@@ -422,7 +441,7 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
     items,
     totals,
     collectionName,
-    paidLabel
+    paidLabel,
   });
   const adminBody = `
     <p><strong>Customer:</strong> ${escapeHtml(name)}</p>
@@ -444,14 +463,14 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
     title: `New ${orderTypeLabel} order${orderNumberLabel}`,
     intro: adminIntro,
     preheader: adminIntro,
-    body: adminBody
+    body: adminBody,
   });
 
   if (order.email) {
     await sendEmail({
       to: [order.email],
       subject: `Your order${orderNumberLabel} with ${BRAND_NAME}`,
-      html: customerHtml
+      html: customerHtml,
     });
   }
 
@@ -459,12 +478,17 @@ const sendOrderCreatedEmails = async ({ order, collectionName }) => {
     await sendEmail({
       to: adminRecipients,
       subject: `New ${orderTypeLabel} order${orderNumberLabel}`,
-      html: adminHtml
+      html: adminHtml,
     });
   }
 };
 
-const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collectionName }) => {
+const sendOrderStatusEmails = async ({
+  order,
+  previousStatus,
+  nextStatus,
+  collectionName,
+}) => {
   const suppressed = new Set(["archived", "cancelled"]);
   if (!nextStatus || suppressed.has(nextStatus)) return;
 
@@ -484,7 +508,7 @@ const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collec
     items,
     totals,
     collectionName,
-    paidLabel
+    paidLabel,
   });
 
   const trackingLine = trackingLink
@@ -509,7 +533,7 @@ const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collec
     title: "Order status update",
     intro,
     preheader: intro,
-    body: customerBody
+    body: customerBody,
   });
 
   const adminRecipients = getAdminRecipients();
@@ -529,14 +553,14 @@ const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collec
     title: `Order status updated${orderNumberLabel}`,
     intro: adminIntro,
     preheader: adminIntro,
-    body: adminBody
+    body: adminBody,
   });
 
   if (order.email) {
     await sendEmail({
       to: [order.email],
       subject: `Your order${orderNumberLabel} status update`,
-      html: customerHtml
+      html: customerHtml,
     });
   }
 
@@ -544,7 +568,7 @@ const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collec
     await sendEmail({
       to: adminRecipients,
       subject: `Order status updated${orderNumberLabel}`,
-      html: adminHtml
+      html: adminHtml,
     });
   }
 };
@@ -552,7 +576,7 @@ const sendOrderStatusEmails = async ({ order, previousStatus, nextStatus, collec
 const loadStockData = async () => {
   const [itemsSnap, categoriesSnap] = await Promise.all([
     db.collection("stockItems").orderBy("name", "asc").get(),
-    db.collection("stockCategories").orderBy("name", "asc").get()
+    db.collection("stockCategories").orderBy("name", "asc").get(),
   ]);
 
   const categoryLookup = new Map();
@@ -569,7 +593,7 @@ const loadStockData = async () => {
       subCategory: data.subCategory || "",
       quantity: toNumber(data.quantity),
       threshold: toNumber(data.threshold),
-      notes: data.notes || ""
+      notes: data.notes || "",
     };
   });
 
@@ -592,7 +616,9 @@ const buildStockSummaryHtml = (items, includeAll) => {
             ? `${escapeHtml(item.name)} (${escapeHtml(categoryLabel)})`
             : escapeHtml(item.name);
           const lowFlag =
-            item.threshold > 0 && item.quantity <= item.threshold ? " <strong>(LOW)</strong>" : "";
+            item.threshold > 0 && item.quantity <= item.threshold
+              ? " <strong>(LOW)</strong>"
+              : "";
           return `<li>${label}: ${item.quantity} (threshold ${item.threshold || "-"})${lowFlag}</li>`;
         })
         .join("")}</ul>`
@@ -617,49 +643,54 @@ const sendStockSummaryEmail = async ({ title, includeAll }) => {
     title,
     intro,
     preheader: intro,
-    body: buildStockSummaryHtml(items, includeAll)
+    body: buildStockSummaryHtml(items, includeAll),
   });
 
   return sendEmail({
     to: adminRecipients,
     subject: title,
-    html
+    html,
   });
 };
 
-exports.ensureCurrentUserProfile = functions.https.onCall(async (_data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Sign in required.");
-  }
+exports.ensureCurrentUserProfile = functions.https.onCall(
+  async (_data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Sign in required."
+      );
+    }
 
-  const uid = context.auth.uid;
-  const email = context.auth.token.email || "";
-  const role = getRoleFromContext(context) ?? null;
+    const uid = context.auth.uid;
+    const email = context.auth.token.email || "";
+    const role = getRoleFromContext(context) ?? null;
 
-  const userRef = db.collection("users").doc(uid);
-  const snapshot = await userRef.get();
+    const userRef = db.collection("users").doc(uid);
+    const snapshot = await userRef.get();
 
-  if (!snapshot.exists) {
-    await userRef.set({
-      email,
-      role,
-      disabled: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-  } else {
-    await userRef.set(
-      {
+    if (!snapshot.exists) {
+      await userRef.set({
         email,
-        role: role ?? snapshot.data()?.role ?? null,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-  }
+        role,
+        disabled: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      await userRef.set(
+        {
+          email,
+          role: role ?? snapshot.data()?.role ?? null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
 
-  return { uid, email, role };
-});
+    return { uid, email, role };
+  }
+);
 
 exports.createUserProfile = functions.auth.user().onCreate(async (user) => {
   const email = String(user.email || "").toLowerCase();
@@ -673,34 +704,43 @@ exports.createUserProfile = functions.auth.user().onCreate(async (user) => {
     }
   }
 
-  await db.collection("users").doc(user.uid).set(
-    {
-      email: user.email || "",
-      role,
-      disabled: Boolean(user.disabled),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    },
-    { merge: true }
-  );
+  await db
+    .collection("users")
+    .doc(user.uid)
+    .set(
+      {
+        email: user.email || "",
+        role,
+        disabled: Boolean(user.disabled),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 });
 
 exports.createAuthUser = functions.https.onCall(async (data, context) => {
   requireAdmin(context);
 
-  const email = String(data.email || "").trim().toLowerCase();
+  const email = String(data.email || "")
+    .trim()
+    .toLowerCase();
   const role = String(data.role || "worker").trim();
   const password = String(data.password || "").trim();
 
   if (!email) {
-    throw new functions.https.HttpsError("invalid-argument", "Email is required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Email is required."
+    );
   }
 
-  const generatedPassword = password || `Temp${Math.random().toString(36).slice(-8)}!`;
+  const generatedPassword =
+    password || `Temp${Math.random().toString(36).slice(-8)}!`;
 
   const userRecord = await admin.auth().createUser({
     email,
-    password: generatedPassword
+    password: generatedPassword,
   });
 
   await admin.auth().setCustomUserClaims(userRecord.uid, { role });
@@ -710,12 +750,12 @@ exports.createAuthUser = functions.https.onCall(async (data, context) => {
     role,
     disabled: false,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
   return {
     uid: userRecord.uid,
-    temporaryPassword: password ? null : generatedPassword
+    temporaryPassword: password ? null : generatedPassword,
   };
 });
 
@@ -726,7 +766,10 @@ exports.updateAuthUserStatus = functions.https.onCall(async (data, context) => {
   const disabled = Boolean(data.disabled);
 
   if (!uid) {
-    throw new functions.https.HttpsError("invalid-argument", "User id is required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "User id is required."
+    );
   }
 
   await admin.auth().updateUser(uid, { disabled });
@@ -734,7 +777,7 @@ exports.updateAuthUserStatus = functions.https.onCall(async (data, context) => {
   await db.collection("users").doc(uid).set(
     {
       disabled,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
@@ -750,7 +793,10 @@ exports.updateAuthUserRole = functions.https.onCall(async (data, context) => {
   const allowedRoles = new Set(["worker", "admin", "super_admin"]);
 
   if (!uid || !allowedRoles.has(role)) {
-    throw new functions.https.HttpsError("invalid-argument", "Valid user id and role are required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Valid user id and role are required."
+    );
   }
 
   const userRecord = await admin.auth().getUser(uid);
@@ -760,7 +806,7 @@ exports.updateAuthUserRole = functions.https.onCall(async (data, context) => {
   await db.collection("users").doc(uid).set(
     {
       role,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
@@ -773,7 +819,10 @@ exports.deleteAuthUser = functions.https.onCall(async (data, context) => {
 
   const uid = String(data.uid || "").trim();
   if (!uid) {
-    throw new functions.https.HttpsError("invalid-argument", "User id is required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "User id is required."
+    );
   }
 
   await admin.auth().deleteUser(uid);
@@ -782,39 +831,50 @@ exports.deleteAuthUser = functions.https.onCall(async (data, context) => {
   return { uid };
 });
 
-exports.deleteCategoryWithItems = functions.https.onCall(async (data, context) => {
-  requireAdmin(context);
+exports.deleteCategoryWithItems = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
 
-  const categoryId = String(data.categoryId || "").trim();
-  if (!categoryId) {
-    throw new functions.https.HttpsError("invalid-argument", "Category id is required.");
+    const categoryId = String(data.categoryId || "").trim();
+    if (!categoryId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Category id is required."
+      );
+    }
+
+    const itemsQuery = await db
+      .collection("stockItems")
+      .where("categoryId", "==", categoryId)
+      .get();
+
+    const batch = db.batch();
+    itemsQuery.forEach((docSnap) => batch.delete(docSnap.ref));
+    batch.delete(db.collection("stockCategories").doc(categoryId));
+
+    await batch.commit();
+
+    return { deletedItems: itemsQuery.size };
   }
-
-  const itemsQuery = await db
-    .collection("stockItems")
-    .where("categoryId", "==", categoryId)
-    .get();
-
-  const batch = db.batch();
-  itemsQuery.forEach((docSnap) => batch.delete(docSnap.ref));
-  batch.delete(db.collection("stockCategories").doc(categoryId));
-
-  await batch.commit();
-
-  return { deletedItems: itemsQuery.size };
-});
+);
 
 exports.sendDispatchEmail = functions.https.onCall(async (data, context) => {
   requireStaff(context);
 
   const collectionName = String(data?.collectionName || "").trim();
   if (!["eggOrders", "livestockOrders"].includes(collectionName)) {
-    throw new functions.https.HttpsError("invalid-argument", "Invalid collection name.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Invalid collection name."
+    );
   }
 
   const orderId = String(data?.orderId || "").trim();
   if (!orderId) {
-    throw new functions.https.HttpsError("invalid-argument", "Order id is required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Order id is required."
+    );
   }
 
   const orderRef = db.collection(collectionName).doc(orderId);
@@ -826,10 +886,14 @@ exports.sendDispatchEmail = functions.https.onCall(async (data, context) => {
   const order = orderSnap.data() || {};
   const email = String(order.email || "").trim();
   if (!email) {
-    throw new functions.https.HttpsError("failed-precondition", "Order email is missing.");
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Order email is missing."
+    );
   }
 
-  const name = [order.name, order.surname].filter(Boolean).join(" ").trim() || "Customer";
+  const name =
+    [order.name, order.surname].filter(Boolean).join(" ").trim() || "Customer";
   const orderNumberLabel = order.orderNumber ? ` ${order.orderNumber}` : "";
   const sendDate = order.sendDate || "";
   const delivery = order.deliveryOption || "";
@@ -842,7 +906,7 @@ exports.sendDispatchEmail = functions.https.onCall(async (data, context) => {
     items,
     totals,
     collectionName,
-    paidLabel
+    paidLabel,
   });
 
   const trackingLine = trackingLink
@@ -866,13 +930,13 @@ exports.sendDispatchEmail = functions.https.onCall(async (data, context) => {
       ${trackingLine}
       <p class="muted">If you have questions, reply to this email.</p>
       ${buildIndemnitySectionHtml()}
-    `
+    `,
   });
 
   const result = await sendEmail({
     to: [email],
     subject,
-    html
+    html,
   });
 
   await orderRef.set(
@@ -888,12 +952,18 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data, context) => {
 
   const collectionName = String(data?.collectionName || "").trim();
   if (!["eggOrders", "livestockOrders"].includes(collectionName)) {
-    throw new functions.https.HttpsError("invalid-argument", "Invalid collection name.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Invalid collection name."
+    );
   }
 
   const orderId = String(data?.orderId || "").trim();
   if (!orderId) {
-    throw new functions.https.HttpsError("invalid-argument", "Order id is required.");
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Order id is required."
+    );
   }
 
   const orderRef = db.collection(collectionName).doc(orderId);
@@ -905,12 +975,18 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data, context) => {
   const order = orderSnap.data() || {};
   const email = String(order.email || "").trim();
   if (!email) {
-    throw new functions.https.HttpsError("failed-precondition", "Order email is missing.");
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Order email is missing."
+    );
   }
 
   const invoiceUrl = String(order.invoiceUrl || "").trim();
   if (!invoiceUrl) {
-    throw new functions.https.HttpsError("failed-precondition", "Invoice has not been generated.");
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Invoice has not been generated."
+    );
   }
 
   const items = getOrderItems(order);
@@ -918,7 +994,8 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data, context) => {
   const name = getCustomerName(order);
   const paidLabel = getPaidLabel(order);
   const invoiceNumber = buildInvoiceNumber({ ...order, id: orderSnap.id });
-  const orderTypeLabel = collectionName === "livestockOrders" ? "livestock" : "egg";
+  const orderTypeLabel =
+    collectionName === "livestockOrders" ? "livestock" : "egg";
   const intro = `Here is your invoice ${invoiceNumber} from ${BRAND_NAME}.`;
 
   const summaryCard = buildOrderSummaryCard({
@@ -926,7 +1003,7 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data, context) => {
     items,
     totals,
     collectionName,
-    paidLabel
+    paidLabel,
   });
 
   const body = `
@@ -942,19 +1019,19 @@ exports.sendInvoiceEmail = functions.https.onCall(async (data, context) => {
     title: `Invoice ${invoiceNumber}`,
     intro,
     preheader: intro,
-    body
+    body,
   });
 
   const result = await sendEmail({
     to: [email],
     subject: `Invoice ${invoiceNumber} from ${BRAND_NAME}`,
-    html
+    html,
   });
 
   await orderRef.set(
     {
       invoiceNumber,
-      invoiceEmailedAt: admin.firestore.FieldValue.serverTimestamp()
+      invoiceEmailedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
@@ -975,7 +1052,7 @@ exports.sendTestEmail = functions.https.onCall(async (data, context) => {
         title: subject,
         intro: "Test email",
         preheader: "Test email",
-        body: rawHtml
+        body: rawHtml,
       });
 
   const result = await sendEmail({ to, subject, html });
@@ -991,7 +1068,7 @@ exports.emailOnOrderCreate = functions.firestore
     const orderNumber = await ensureOrderNumber("eggOrders", orderRef, order);
     await sendOrderCreatedEmails({
       order: { ...order, orderNumber, id: snap.id },
-      collectionName: "eggOrders"
+      collectionName: "eggOrders",
     });
   });
 
@@ -1000,10 +1077,14 @@ exports.emailOnLivestockOrderCreate = functions.firestore
   .onCreate(async (snap) => {
     const orderRef = snap.ref;
     const order = snap.data() || {};
-    const orderNumber = await ensureOrderNumber("livestockOrders", orderRef, order);
+    const orderNumber = await ensureOrderNumber(
+      "livestockOrders",
+      orderRef,
+      order
+    );
     await sendOrderCreatedEmails({
       order: { ...order, orderNumber, id: snap.id },
-      collectionName: "livestockOrders"
+      collectionName: "livestockOrders",
     });
   });
 
@@ -1019,7 +1100,7 @@ exports.emailOnStatusChange = functions.firestore
       order: { ...after, orderNumber, id: change.after.id },
       previousStatus: before.orderStatus,
       nextStatus: after.orderStatus,
-      collectionName: "eggOrders"
+      collectionName: "eggOrders",
     });
     return null;
   });
@@ -1036,7 +1117,7 @@ exports.emailOnLivestockStatusChange = functions.firestore
       order: { ...after, orderNumber, id: change.after.id },
       previousStatus: before.orderStatus,
       nextStatus: after.orderStatus,
-      collectionName: "livestockOrders"
+      collectionName: "livestockOrders",
     });
     return null;
   });
@@ -1059,7 +1140,10 @@ exports.stockThresholdAlert = functions.firestore
       return null;
     }
 
-    if ((beforeQty === null || beforeQty > threshold) && afterQty <= threshold) {
+    if (
+      (beforeQty === null || beforeQty > threshold) &&
+      afterQty <= threshold
+    ) {
       const adminRecipients = getAdminRecipients();
       if (adminRecipients.length === 0) return null;
       const name = escapeHtml(after.name || "Stock item");
@@ -1075,7 +1159,7 @@ exports.stockThresholdAlert = functions.firestore
             <p><strong>Quantity:</strong> ${afterQty}</p>
             <p><strong>Threshold:</strong> ${threshold}</p>
           </div>
-        `
+        `,
       });
       await sendEmail({ to: adminRecipients, subject, html });
     }
@@ -1088,7 +1172,7 @@ exports.stockMorningSummary = functions.pubsub
   .onRun(() =>
     sendStockSummaryEmail({
       title: "Morning stock summary",
-      includeAll: false
+      includeAll: false,
     })
   );
 
@@ -1098,7 +1182,7 @@ exports.stockEveningSummary = functions.pubsub
   .onRun(() =>
     sendStockSummaryEmail({
       title: "Evening stock summary",
-      includeAll: false
+      includeAll: false,
     })
   );
 
@@ -1108,7 +1192,7 @@ exports.stockDailyFullSummary = functions.pubsub
   .onRun(() =>
     sendStockSummaryEmail({
       title: "Daily stock summary",
-      includeAll: true
+      includeAll: true,
     })
   );
 
@@ -1116,7 +1200,7 @@ exports.sendStockTestEmail = functions.https.onCall(async (_data, context) => {
   requireAdmin(context);
   const result = await sendStockSummaryEmail({
     title: "Stock summary test",
-    includeAll: true
+    includeAll: true,
   });
   return { id: result?.data?.id || null };
 });
@@ -1150,7 +1234,7 @@ exports.syncAuthUsers = functions.https.onCall(async (_data, context) => {
     const payload = {
       email: user.email || "",
       disabled: Boolean(user.disabled),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     if (claimRole) {
       payload.role = claimRole;
@@ -1162,70 +1246,83 @@ exports.syncAuthUsers = functions.https.onCall(async (_data, context) => {
   return { count: allUsers.length };
 });
 
-exports.promoteAllUsersToAdmin = functions.https.onCall(async (_data, context) => {
-  requireAdmin(context);
+exports.promoteAllUsersToAdmin = functions.https.onCall(
+  async (_data, context) => {
+    requireAdmin(context);
 
-  const allUsers = [];
-  let nextPageToken;
-  do {
-    const result = await admin.auth().listUsers(1000, nextPageToken);
-    allUsers.push(...result.users);
-    nextPageToken = result.pageToken;
-  } while (nextPageToken);
+    const allUsers = [];
+    let nextPageToken;
+    do {
+      const result = await admin.auth().listUsers(1000, nextPageToken);
+      allUsers.push(...result.users);
+      nextPageToken = result.pageToken;
+    } while (nextPageToken);
 
-  for (const user of allUsers) {
-    await admin.auth().setCustomUserClaims(user.uid, {
-      ...(user.customClaims || {}),
-      role: "admin"
-    });
-    await db.collection("users").doc(user.uid).set(
-      {
+    for (const user of allUsers) {
+      await admin.auth().setCustomUserClaims(user.uid, {
+        ...(user.customClaims || {}),
         role: "admin",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
+      });
+      await db.collection("users").doc(user.uid).set(
+        {
+          role: "admin",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    return { count: allUsers.length };
   }
+);
 
-  return { count: allUsers.length };
-});
+exports.sendLegacyCorrectionEmails = functions.https.onCall(
+  async (data, context) => {
+    requireAdmin(context);
 
-exports.sendLegacyCorrectionEmails = functions.https.onCall(async (data, context) => {
-  requireAdmin(context);
+    const collectionName = String(data?.collectionName || "eggOrders");
+    const orderIds = Array.isArray(data?.orderIds) ? data.orderIds : [];
+    if (!orderIds.length) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Order ids are required."
+      );
+    }
 
-  const collectionName = String(data?.collectionName || "eggOrders");
-  const orderIds = Array.isArray(data?.orderIds) ? data.orderIds : [];
-  if (!orderIds.length) {
-    throw new functions.https.HttpsError("invalid-argument", "Order ids are required.");
-  }
+    const subject = data?.subject || "Order update from The Crooked Fence";
+    const message = data?.message || "Please note an update to your order.";
 
-  const subject = data?.subject || "Order update from The Crooked Fence";
-  const message = data?.message || "Please note an update to your order.";
-
-  const results = [];
-  for (const orderId of orderIds) {
-    const snap = await db.collection(collectionName).doc(orderId).get();
-    if (!snap.exists) continue;
-    const order = snap.data() || {};
-    if (!order.email) continue;
-    const name = [order.name, order.surname].filter(Boolean).join(" ").trim() || "Customer";
-    const orderNumber = order.orderNumber || "";
-    const body = `
+    const results = [];
+    for (const orderId of orderIds) {
+      const snap = await db.collection(collectionName).doc(orderId).get();
+      if (!snap.exists) continue;
+      const order = snap.data() || {};
+      if (!order.email) continue;
+      const name =
+        [order.name, order.surname].filter(Boolean).join(" ").trim() ||
+        "Customer";
+      const orderNumber = order.orderNumber || "";
+      const body = `
       <p>Hi ${escapeHtml(name)},</p>
       <p>${escapeHtml(message)}</p>
       ${orderNumber ? `<p><strong>Order reference:</strong> ${escapeHtml(orderNumber)}</p>` : ""}
       <p class="muted">If you have questions, reply to this email.</p>
       ${buildIndemnitySectionHtml()}
     `;
-    const html = buildEmailHtml({
-      title: subject,
-      intro: message,
-      preheader: message,
-      body
-    });
-    const result = await sendEmail({ to: [order.email], subject, html });
-    results.push({ id: orderId, email: order.email, result: result?.data?.id || null });
-  }
+      const html = buildEmailHtml({
+        title: subject,
+        intro: message,
+        preheader: message,
+        body,
+      });
+      const result = await sendEmail({ to: [order.email], subject, html });
+      results.push({
+        id: orderId,
+        email: order.email,
+        result: result?.data?.id || null,
+      });
+    }
 
-  return { sent: results.length, results };
-});
+    return { sent: results.length, results };
+  }
+);

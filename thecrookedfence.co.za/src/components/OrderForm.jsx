@@ -7,22 +7,22 @@ import {
   onSnapshot,
   orderBy,
   query,
-  serverTimestamp
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../lib/firebase.js";
 import {
   COUNTRY_CODES,
   DEFAULT_FORM_DELIVERY_OPTIONS,
-  DEFAULT_LIVESTOCK_DELIVERY_OPTIONS
+  DEFAULT_LIVESTOCK_DELIVERY_OPTIONS,
 } from "../data/defaults.js";
 
-const cardClass = "bg-brandBeige shadow-lg rounded-2xl border border-brandGreen/10";
+const cardClass =
+  "bg-brandBeige shadow-lg rounded-2xl border border-brandGreen/10";
 const inputClass =
   "w-full rounded-lg border border-brandGreen/20 bg-white/70 px-4 py-3 text-brandGreen placeholder:text-brandGreen/50 focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30";
 const indemnityText =
-  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control - such as handling during shipping, incubation conditions, and environmental variables - that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.";
-const indemnityAcceptanceText =
-  "I have read and accept the indemnity terms.";
+  "NO REFUNDS. We take great care in packaging all eggs to ensure they are shipped as safely as possible. However, once eggs leave our care, we cannot be held responsible for damage that may occur during transit, including cracked eggs. Hatch rates cannot be guaranteed. There are many factors beyond our control—such as handling during shipping, incubation conditions, and environmental variables—that may affect development. As eggs are considered livestock, purchasing hatching eggs involves an inherent risk that the buyer accepts at the time of purchase.\n\nAvailability Notice: Some eggs are subject to a 3–6 week waiting period and may not be available for immediate shipment. By placing an order, the buyer acknowledges and accepts this potential delay.\n\nExtra Eggs Disclaimer: Extra eggs are never guaranteed. While we may occasionally include additional eggs when available, this is done at our discretion and should not be expected or assumed as part of any order.";
+const indemnityAcceptanceText = "I have read and accept the indemnity terms.";
 
 const createDefaultForm = (isLivestock) => ({
   name: "",
@@ -36,7 +36,7 @@ const createDefaultForm = (isLivestock) => ({
     : DEFAULT_FORM_DELIVERY_OPTIONS[0].id,
   otherDelivery: "",
   sendDate: "",
-  notes: ""
+  notes: "",
 });
 
 const toQuantityMap = (items, existing = {}) => {
@@ -50,8 +50,12 @@ const toQuantityMap = (items, existing = {}) => {
 
 export default function OrderForm({ variant = "eggs" }) {
   const isLivestock = variant === "livestock";
-  const pageTitle = isLivestock ? "Livestock Order Form" : "Fertile Egg Order Form";
-  const itemTitle = isLivestock ? "Livestock type & quantities" : "Egg types & quantities";
+  const pageTitle = isLivestock
+    ? "Livestock Order Form"
+    : "Fertile Egg Order Form";
+  const itemTitle = isLivestock
+    ? "Livestock type & quantities"
+    : "Egg types & quantities";
   const itemLabel = isLivestock ? "livestock type" : "egg type";
   const dateLabel = isLivestock
     ? "Preferred delivery/need-by date*"
@@ -65,9 +69,13 @@ export default function OrderForm({ variant = "eggs" }) {
   const [categories, setCategories] = useState([]);
   const [form, setForm] = useState(() => createDefaultForm(isLivestock));
   const [deliveryOptions, setDeliveryOptions] = useState(
-    isLivestock ? DEFAULT_LIVESTOCK_DELIVERY_OPTIONS : DEFAULT_FORM_DELIVERY_OPTIONS
+    isLivestock
+      ? DEFAULT_LIVESTOCK_DELIVERY_OPTIONS
+      : DEFAULT_FORM_DELIVERY_OPTIONS
   );
-  const [quantities, setQuantities] = useState(() => toQuantityMap(initialItems));
+  const [quantities, setQuantities] = useState(() =>
+    toQuantityMap(initialItems)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -88,11 +96,13 @@ export default function OrderForm({ variant = "eggs" }) {
             label: docData.label ?? "Unnamed",
             price: Number(docData.price ?? 0),
             specialPrice:
-              docData.specialPrice === undefined ? null : Number(docData.specialPrice),
+              docData.specialPrice === undefined
+                ? null
+                : Number(docData.specialPrice),
             order: docData.order ?? 0,
             categoryId: docData.categoryId ?? "",
             categoryName: docData.categoryName ?? docData.category ?? "",
-            available: docData.available !== false
+            available: docData.available !== false,
           };
         });
         setItems(data);
@@ -124,7 +134,7 @@ export default function OrderForm({ variant = "eggs" }) {
           return {
             id: docSnap.id,
             name: docData.name ?? "",
-            description: docData.description ?? ""
+            description: docData.description ?? "",
           };
         });
         setCategories(data);
@@ -156,7 +166,7 @@ export default function OrderForm({ variant = "eggs" }) {
             id: docSnap.id,
             label: docData.label ?? "Delivery",
             cost: Number(docData.cost ?? 0),
-            order: docData.order ?? 0
+            order: docData.order ?? 0,
           };
         });
         const merged = data.length > 0 ? data : fallback;
@@ -186,7 +196,8 @@ export default function OrderForm({ variant = "eggs" }) {
     () =>
       selectedItems.reduce((sum, item) => {
         const special = item.specialPrice ?? null;
-        const unitPrice = special === null || special === 0 ? item.price ?? 0 : special;
+        const unitPrice =
+          special === null || special === 0 ? item.price ?? 0 : special;
         const qty = quantities[item.id] ?? 0;
         return sum + unitPrice * qty;
       }, 0),
@@ -197,21 +208,24 @@ export default function OrderForm({ variant = "eggs" }) {
     () =>
       selectedItems.map((item) => {
         const special = item.specialPrice ?? null;
-        const unitPrice = special === null || special === 0 ? item.price ?? 0 : special;
+        const unitPrice =
+          special === null || special === 0 ? item.price ?? 0 : special;
         const qty = quantities[item.id] ?? 0;
         return {
           id: item.id,
           label: item.label,
           qty,
           unitPrice,
-          lineTotal: unitPrice * qty
+          lineTotal: unitPrice * qty,
         };
       }),
     [selectedItems, quantities]
   );
 
   const deliveryCost = useMemo(() => {
-    const option = deliveryOptions.find((opt) => opt.id === form.deliveryOption);
+    const option = deliveryOptions.find(
+      (opt) => opt.id === form.deliveryOption
+    );
     return option ? option.cost : 0;
   }, [deliveryOptions, form.deliveryOption]);
 
@@ -257,7 +271,10 @@ export default function OrderForm({ variant = "eggs" }) {
     const categoryMap = new Map();
     const categoryIds = categories.map((cat) => cat.id);
     const categoryDescriptionMap = new Map(
-      categories.map((cat) => [cat.name.trim().toLowerCase(), cat.description ?? ""])
+      categories.map((cat) => [
+        cat.name.trim().toLowerCase(),
+        cat.description ?? "",
+      ])
     );
 
     items.forEach((item) => {
@@ -280,7 +297,9 @@ export default function OrderForm({ variant = "eggs" }) {
 
     const orderedKeys = [
       ...categoryIds.filter((id) => categoryMap.has(id)),
-      ...Array.from(categoryMap.keys()).filter((id) => !categoryIds.includes(id))
+      ...Array.from(categoryMap.keys()).filter(
+        (id) => !categoryIds.includes(id)
+      ),
     ];
 
     return orderedKeys.map((id) => ({ id, ...categoryMap.get(id) }));
@@ -316,14 +335,15 @@ export default function OrderForm({ variant = "eggs" }) {
             ? `Other: ${form.otherDelivery.trim()}`
             : selectedDelivery?.label ?? "",
         deliveryCost: selectedDelivery?.cost ?? 0,
-        otherDelivery: form.deliveryOption === "other" ? form.otherDelivery.trim() : "",
+        otherDelivery:
+          form.deliveryOption === "other" ? form.otherDelivery.trim() : "",
         sendDate: form.sendDate,
         eggs: selectedItems.map((item) => ({
           id: item.id,
           label: item.label,
           quantity: quantities[item.id],
           price: item.price,
-          specialPrice: item.specialPrice ?? null
+          specialPrice: item.specialPrice ?? null,
         })),
         formType: variant,
         orderStatus: "pending",
@@ -333,7 +353,7 @@ export default function OrderForm({ variant = "eggs" }) {
         paid: false,
         indemnityAccepted: true,
         indemnityAcceptedAt: serverTimestamp(),
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       };
 
       const collectionName = isLivestock ? "livestockOrders" : "eggOrders";
@@ -358,7 +378,9 @@ export default function OrderForm({ variant = "eggs" }) {
       );
       setIsModalOpen(true);
       setForm(createDefaultForm(isLivestock));
-      setQuantities(items.reduce((acc, item) => ({ ...acc, [item.id]: 0 }), {}));
+      setQuantities(
+        items.reduce((acc, item) => ({ ...acc, [item.id]: 0 }), {})
+      );
       setIndemnityAccepted(false);
     } catch (err) {
       console.error("Order submit error:", err);
@@ -366,8 +388,8 @@ export default function OrderForm({ variant = "eggs" }) {
         err?.code === "permission-denied"
           ? "Submission blocked by Firestore rules. Please allow creates to the target collection."
           : err?.message?.includes("Firebase")
-            ? `Firebase error: ${err.message}`
-            : "Something went wrong while submitting. Please try again.";
+          ? `Firebase error: ${err.message}`
+          : "Something went wrong while submitting. Please try again.";
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -389,14 +411,14 @@ export default function OrderForm({ variant = "eggs" }) {
             </p>
             <h1 className="text-3xl font-bold text-brandGreen">{pageTitle}</h1>
             <p className="text-brandGreen/80">
-              Please help us keep track of our egg orders by filling in the following. Thank you
-              so much for your support.
+              Please help us keep track of our egg orders by filling in the
+              following. Thank you so much for your support.
             </p>
           </div>
           <div className="w-full space-y-2 rounded-xl bg-white/70 p-4 text-left text-sm text-brandGreen shadow-inner">
             <p className="font-semibold text-red-700">
-              Please follow up via WhatsApp (082 891 07612) for order updates and to confirm
-              payment by sending proof of payment.
+              Please follow up via WhatsApp (082 891 07612) for order updates
+              and to confirm payment by sending proof of payment.
             </p>
             <p className="text-brandGreen/80">
               Support email:{" "}
@@ -409,14 +431,18 @@ export default function OrderForm({ variant = "eggs" }) {
             </p>
             {isLivestock ? (
               <p className="text-brandGreen/80">
-                Delivery prices are shown per option; livestock delivery differs from eggs.
+                Delivery prices are shown per option; livestock delivery differs
+                from eggs.
               </p>
             ) : null}
           </div>
         </div>
       </div>
 
-      <form onSubmit={submitOrder} className={`${cardClass} space-y-6 p-6 md:p-8`}>
+      <form
+        onSubmit={submitOrder}
+        className={`${cardClass} space-y-6 p-6 md:p-8`}
+      >
         <div className={`${cardClass} space-y-4 p-4 md:p-5`}>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
@@ -424,8 +450,8 @@ export default function OrderForm({ variant = "eggs" }) {
               {!isLivestock ? (
                 <>
                   <p className="text-sm text-brandGreen/70">
-                    Limited Quantities of Chicken Breed. Orders can only be made up to 20 at a
-                    time per breed.
+                    Limited Quantities of Chicken Breed. Orders can only be made
+                    up to 20 at a time per breed.
                   </p>
                   <p className="text-sm text-brandGreen/70">
                     Bulk quantities available for Indian Runner Ducks and Quail.
@@ -435,7 +461,9 @@ export default function OrderForm({ variant = "eggs" }) {
             </div>
             <div className="space-y-1 text-sm text-brandGreen/80">
               <p>
-                <span className="font-semibold text-brandGreen">{dateLabel}</span>
+                <span className="font-semibold text-brandGreen">
+                  {dateLabel}
+                </span>
               </p>
               <input
                 type="date"
@@ -464,14 +492,19 @@ export default function OrderForm({ variant = "eggs" }) {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex flex-col">
-                        <p className="font-semibold text-brandGreen">{group.label}</p>
+                        <p className="font-semibold text-brandGreen">
+                          {group.label}
+                        </p>
                         {group.description ? (
-                          <p className="text-sm text-brandGreen/80">{group.description}</p>
+                          <p className="text-sm text-brandGreen/80">
+                            {group.description}
+                          </p>
                         ) : null}
                       </div>
                       <div className="flex flex-col items-end">
                         <span className="text-xs text-brandGreen/60">
-                          {group.items.length} item{group.items.length === 1 ? "" : "s"}
+                          {group.items.length} item
+                          {group.items.length === 1 ? "" : "s"}
                         </span>
                       </div>
                     </div>
@@ -487,11 +520,16 @@ export default function OrderForm({ variant = "eggs" }) {
                           >
                             <div className="flex justify-between gap-3">
                               <div>
-                                <p className="font-semibold text-brandGreen">{item.label}</p>
+                                <p className="font-semibold text-brandGreen">
+                                  {item.label}
+                                </p>
                                 <p className="text-sm text-brandGreen/70">
                                   Normal: R{item.price.toFixed(2)}
-                                  {item.specialPrice !== null && item.specialPrice !== undefined
-                                    ? ` \u00b7 Special: R${item.specialPrice.toFixed(2)}`
+                                  {item.specialPrice !== null &&
+                                  item.specialPrice !== undefined
+                                    ? ` \u00b7 Special: R${item.specialPrice.toFixed(
+                                        2
+                                      )}`
                                     : ""}
                                 </p>
                                 {!isAvailable ? (
@@ -505,13 +543,18 @@ export default function OrderForm({ variant = "eggs" }) {
                                 min={0}
                                 disabled={!isAvailable}
                                 className={`w-24 rounded-lg border border-brandGreen/30 px-3 py-2 text-right font-semibold text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30 ${
-                                  isAvailable ? "bg-brandCream" : "bg-gray-100 text-brandGreen/50"
+                                  isAvailable
+                                    ? "bg-brandCream"
+                                    : "bg-gray-100 text-brandGreen/50"
                                 }`}
                                 value={quantities[item.id] ?? 0}
                                 onChange={(event) =>
                                   setQuantities((prev) => ({
                                     ...prev,
-                                    [item.id]: Math.max(0, Number(event.target.value))
+                                    [item.id]: Math.max(
+                                      0,
+                                      Number(event.target.value)
+                                    ),
                                   }))
                                 }
                               />
@@ -542,11 +585,16 @@ export default function OrderForm({ variant = "eggs" }) {
                     >
                       <div className="flex justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-brandGreen">{item.label}</p>
+                          <p className="font-semibold text-brandGreen">
+                            {item.label}
+                          </p>
                           <p className="text-sm text-brandGreen/70">
                             Normal: R{item.price.toFixed(2)}
-                            {item.specialPrice !== null && item.specialPrice !== undefined
-                              ? ` \u00b7 Special: R${item.specialPrice.toFixed(2)}`
+                            {item.specialPrice !== null &&
+                            item.specialPrice !== undefined
+                              ? ` \u00b7 Special: R${item.specialPrice.toFixed(
+                                  2
+                                )}`
                               : ""}
                           </p>
                           {!isAvailable ? (
@@ -560,13 +608,18 @@ export default function OrderForm({ variant = "eggs" }) {
                           min={0}
                           disabled={!isAvailable}
                           className={`w-24 rounded-lg border border-brandGreen/30 px-3 py-2 text-right font-semibold text-brandGreen focus:border-brandGreen focus:outline-none focus:ring-2 focus:ring-brandGreen/30 ${
-                            isAvailable ? "bg-brandCream" : "bg-gray-100 text-brandGreen/50"
+                            isAvailable
+                              ? "bg-brandCream"
+                              : "bg-gray-100 text-brandGreen/50"
                           }`}
                           value={quantities[item.id] ?? 0}
                           onChange={(event) =>
                             setQuantities((prev) => ({
                               ...prev,
-                              [item.id]: Math.max(0, Number(event.target.value))
+                              [item.id]: Math.max(
+                                0,
+                                Number(event.target.value)
+                              ),
                             }))
                           }
                         />
@@ -592,7 +645,9 @@ export default function OrderForm({ variant = "eggs" }) {
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <label className="block text-sm font-semibold text-brandGreen">Name*</label>
+            <label className="block text-sm font-semibold text-brandGreen">
+              Name*
+            </label>
             <input
               type="text"
               className={inputClass}
@@ -602,7 +657,9 @@ export default function OrderForm({ variant = "eggs" }) {
             />
           </div>
           <div className="space-y-2">
-            <label className="block text-sm font-semibold text-brandGreen">Surname*</label>
+            <label className="block text-sm font-semibold text-brandGreen">
+              Surname*
+            </label>
             <input
               type="text"
               className={inputClass}
@@ -612,7 +669,9 @@ export default function OrderForm({ variant = "eggs" }) {
             />
           </div>
           <div className="space-y-2">
-            <label className="block text-sm font-semibold text-brandGreen">Email*</label>
+            <label className="block text-sm font-semibold text-brandGreen">
+              Email*
+            </label>
             <input
               type="email"
               className={inputClass}
@@ -629,7 +688,9 @@ export default function OrderForm({ variant = "eggs" }) {
               <select
                 className={inputClass}
                 value={form.countryCode}
-                onChange={(event) => setField("countryCode", event.target.value)}
+                onChange={(event) =>
+                  setField("countryCode", event.target.value)
+                }
               >
                 {COUNTRY_CODES.map((country) => (
                   <option key={country.code} value={country.code}>
@@ -659,14 +720,16 @@ export default function OrderForm({ variant = "eggs" }) {
               required
             />
             <p className="text-xs text-brandGreen/70">
-              Street name and number, Suburb, Town, Postal code. For PUDO please add the locker
-              name. (PUDO IS FOR EGGS ONLY)
+              Street name and number, Suburb, Town, Postal code. For PUDO please
+              add the locker name. (PUDO IS FOR EGGS ONLY)
             </p>
           </div>
         </div>
 
         <div className={`${cardClass} p-4 md:p-5`}>
-          <h2 className="text-lg font-bold text-brandGreen">Delivery options*</h2>
+          <h2 className="text-lg font-bold text-brandGreen">
+            Delivery options*
+          </h2>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {deliveryOptions.map((option) => (
               <label
@@ -678,7 +741,9 @@ export default function OrderForm({ variant = "eggs" }) {
                   name="deliveryOption"
                   value={option.id}
                   checked={form.deliveryOption === option.id}
-                  onChange={(event) => setField("deliveryOption", event.target.value)}
+                  onChange={(event) =>
+                    setField("deliveryOption", event.target.value)
+                  }
                   className="mt-1 accent-brandGreen"
                 />
                 <div className="flex flex-col">
@@ -699,7 +764,9 @@ export default function OrderForm({ variant = "eggs" }) {
                 type="text"
                 className={inputClass}
                 value={form.otherDelivery}
-                onChange={(event) => setField("otherDelivery", event.target.value)}
+                onChange={(event) =>
+                  setField("otherDelivery", event.target.value)
+                }
                 placeholder="e.g. Meet at local pickup point"
               />
             </div>
@@ -711,15 +778,22 @@ export default function OrderForm({ variant = "eggs" }) {
             Order total (estimate)
           </p>
           {orderNumber ? (
-            <p className="text-xs font-mono text-brandGreen/80">Order number: {orderNumber}</p>
+            <p className="text-xs font-mono text-brandGreen/80">
+              Order number: {orderNumber}
+            </p>
           ) : null}
           <div className="mt-2 space-y-1">
             {itemBreakdown.map((line) => (
-              <div key={line.id} className="flex items-center justify-between text-sm">
+              <div
+                key={line.id}
+                className="flex items-center justify-between text-sm"
+              >
                 <span>
                   {line.label} - {line.qty} x R{line.unitPrice.toFixed(2)}
                 </span>
-                <span className="font-semibold">R{line.lineTotal.toFixed(2)}</span>
+                <span className="font-semibold">
+                  R{line.lineTotal.toFixed(2)}
+                </span>
               </div>
             ))}
             <div className="flex items-center justify-between border-t border-brandGreen/10 pt-1 text-sm">
@@ -741,7 +815,9 @@ export default function OrderForm({ variant = "eggs" }) {
           <p className="text-xs font-semibold uppercase tracking-wide text-brandGreen/60">
             Indemnity
           </p>
-          <p className="mt-2 text-sm text-brandGreen/80">{indemnityText}</p>
+          <p className="mt-2 whitespace-pre-line text-sm text-brandGreen/80">
+            {indemnityText}
+          </p>
           <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-brandGreen">
             <input
               type="checkbox"
@@ -793,8 +869,9 @@ export default function OrderForm({ variant = "eggs" }) {
           >
             <h3 className="text-xl font-bold">Order received</h3>
             <p className="mt-2 text-sm text-brandGreen/80">
-              Thank you! Your order has been submitted. You will receive an email confirmation
-              and updates as we process and update the status of your order.
+              Thank you! Your order has been submitted. You will receive an
+              email confirmation and updates as we process and update the status
+              of your order.
             </p>
             {orderNumber ? (
               <p className="mt-2 text-sm font-semibold text-brandGreen">
